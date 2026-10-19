@@ -59,12 +59,13 @@
   }
   const isMaintenanceSaturday = (data, today) => nextMaintenanceSaturday(data, today) === today;
 
-  // Local overrides: map key -> record. Records older than data.updatedAt are ignored (already merged).
+  // Local overrides: map key -> record. Records older than data.updatedAt are ignored (already merged),
+  // unless the app marked them keep:true (older than the data but not reflected in it yet, so still pending).
   function freshOverride(data, overrides, key) {
     const o = overrides && overrides[key];
     if (!o) return null;
     const base = Date.parse((data && data.updatedAt) || 0) || 0;
-    return (o.at || 0) > base ? o : null;
+    return ((o.at || 0) > base || o.keep) ? o : null;
   }
 
   function maintenanceTasks(data, overrides, today) {

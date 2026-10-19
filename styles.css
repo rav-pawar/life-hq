@@ -125,3 +125,12 @@ main > *, #dash > * { min-width: 0; max-width: 100%; }
   main { padding-left: 12px; padding-right: 12px; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* ---- Auto-refresh: "Updated just now" toast below the header + last-synced indicator ---- */
+.toast { position: fixed; left: 50%; top: calc(var(--header-total) + 8px); z-index: 101; transform: translate(-50%, -6px);
+  background: #12371f; color: #7ee2a8; border: 1px solid #1f6a3c; border-radius: 999px; padding: 4px 12px; font-size: .85rem;
+  font-weight: 600; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s; }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.warn { background: var(--amber-bg); color: #ffd27a; border-color: var(--amber-border); }
+.sync-info:empty { display: none; }
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }

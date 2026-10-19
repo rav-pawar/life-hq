@@ -2,14 +2,17 @@
    The encrypted data file is fetched network-first; plaintext is never cached. */
 importScripts('./config.js', './db.js');
 
-const CACHE = 'life-hq-v4'; // v4: single-row header + sticky nav fixes (v3: per-device public-key encryption, data format v2)
+const CACHE = 'life-hq-v5'; // v5: auto-refresh + network-first data (v4: single-row header; v3: per-device keys, data v2)
+const DATA_KEY = new URL('./data.enc.json', self.registration.scope).href; // cached without the cache-busting query
 const SHELL = [
   './', './index.html', './styles.css', './app.js', './db.js', './config.js', './logic.js', './crypto.js',
   './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'
 ];
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache:'reload' so the new shell is not taken from the HTTP cache (GitHub Pages max-age=600).
+  // skipWaiting + clients.claim: installed PWAs switch to the new code at once (the page reloads itself once).
+  event.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', event => {
@@ -27,17 +30,13 @@ self.addEventListener('fetch', event => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.endsWith('/data.enc.json')) {
-    // Network-first so a fresh publish shows up at once; cached copy keeps it working offline.
-    event.respondWith((async () => {
-      const cache = await caches.open(CACHE);
-      try {
-        const res = await fetch(req, { cache: 'no-store' });
-        if (res && res.ok) cache.put(req, res.clone());
-        return res;
-      } catch (e) {
-        return (await cache.match(req)) || Response.error();
-      }
-    })());
+    // Network-first (no-store, query keeps the CDN from answering with a stale copy) so a fresh publish shows up
+    // at once; the cached copy keeps it working offline and is marked X-Life-HQ-Offline: 1 for the page.
+    event.respondWith(fetchData(req.url).catch(async () => {
+      const cached = await (await caches.open(CACHE)).match(DATA_KEY);
+      if (!cached) return Response.error();
+      return new Response(await cached.blob(), { status: 200, headers: { 'Content-Type': 'application/json', 'X-Life-HQ-Offline': '1' } });
+    }));
     return;
   }
   event.respondWith((async () => {
@@ -54,6 +53,15 @@ self.addEventListener('fetch', event => {
     return Response.error();
   })());
 });
+
+async function fetchData(url) {
+  const u = new URL(url || DATA_KEY);
+  if (!u.searchParams.has('t')) u.searchParams.set('t', Date.now().toString(36));
+  const res = await fetch(u.href, { cache: 'no-store' });
+  if (!res || !res.ok) { if (res && res.status === 404) return res; throw new Error('data fetch failed ' + (res && res.status)); }
+  await (await caches.open(CACHE)).put(DATA_KEY, res.clone());
+  return res;
+}
 
 function normalize(raw) {
   let p = raw;
@@ -107,6 +115,8 @@ async function handleIncoming(raw) {
   try { await HQDB.putAlert(a); } catch (e) { /* still show the notification */ }
   const [title, opts] = notificationFor(a);
   await self.registration.showNotification(title, opts);
+  // New data is usually published with a push: refresh the offline copy, then tell open pages to refetch now.
+  try { await fetchData(); } catch (e) { /* offline: pages keep their data */ }
   await broadcast({ kind: 'alert', alert: a });
 }
 
@@ -138,7 +148,7 @@ self.addEventListener('notificationclick', event => {
     if (sameApp) {
       for (const c of clients) {
         if (c.url.startsWith(scope) && 'focus' in c) {
-          c.postMessage({ kind: 'focus-alert', id: data.id });
+          c.postMessage({ kind: 'focus-alert', id: data.id }); // the page also refetches the data on this
           return c.focus();
         }
       }

@@ -8,7 +8,7 @@
   let reg = null;
 
   // In-memory only. Plaintext data is never written to storage.
-  const st = { env: null, device: null, data: null, overrides: {}, flashId: null, noData: false };
+  const st = { env: null, device: null, data: null, overrides: {}, flashId: null, noData: false, lastSync: 0, offline: false, lastCheck: 0 };
 
   // Optional ?now=2026-01-03T08:45:00+05:30 to preview another time (testing only; no effect on data).
   const nowParam = new URLSearchParams(location.search).get('now');
@@ -42,13 +42,22 @@
   // There is no password: the device can decrypt only if the published data lists its kid as a recipient.
   const NOT_ENROLLED = 'This device isn\u2019t enrolled yet \u2014 paste the enrollment code to your assistant';
 
+  // Network-first, never a stale copy: no-store + a cache-busting query (GitHub Pages sends max-age=600).
+  // Offline, the service worker answers from its cache and marks the response with X-Life-HQ-Offline: 1.
   async function loadEnvelope() {
     try {
-      const res = await fetch(cfg.dataUrl || './data.enc.json', { cache: 'no-store' });
+      const u = new URL(cfg.dataUrl || './data.enc.json', location.href);
+      u.searchParams.set('t', Date.now().toString(36));
+      const res = await fetch(u.href, { cache: 'no-store' });
+      st.offline = res.headers.get('X-Life-HQ-Offline') === '1';
       if (!res.ok) return null;
-      return await res.json();
-    } catch (e) { return null; }
+      const env = await res.json();
+      if (!st.offline) { st.lastSync = Date.now(); HQDB.setMeta('lastSync', st.lastSync).catch(() => {}); }
+      return env;
+    } catch (e) { st.offline = true; return null; }
+    finally { updateSyncInfo(); }
   }
+  const envFp = env => (env && typeof env === 'object') ? [env.v, env.iv, env.ct].join('|') : '';
 
   async function loadDevice() {
     const d = await HQDB.getMeta('deviceKey').catch(() => null);
@@ -152,15 +161,39 @@
   }
 
   // ================= Local overrides =================
-  async function loadOverrides() { st.overrides = await HQDB.getLocalAll().catch(() => ({})); }
-  async function setLocal(key, val) { await HQDB.setLocal(key, Object.assign({ at: Date.now() }, val)); await renderAll(); }
-  async function delLocal(key) { await HQDB.delLocal(key); await renderAll(); }
+  // Taps live in IndexedDB ('local' store) until the published data reflects them, so they survive reloads and
+  // auto-refreshes. A tap newer than data.updatedAt is pending. A tap older than data.updatedAt (i.e. the data was
+  // republished after it) is cleared if the data already shows it (merge-changes applied it), otherwise it is
+  // kept as pending (keep:true) and still exported in "Changes to sync".
+  function reflected(key, v, d) {
+    const i = key.indexOf(':'), kind = key.slice(0, i), id = key.slice(i + 1);
+    const find = list => (list || []).find(x => x && x.id === id);
+    if (kind === 'maint') { const t = find(((d.maintenance || {}).appliances || []).flatMap(a => a.tasks || [])); return !t || (!!t.lastDone && !!v.lastDone && t.lastDone >= v.lastDone); }
+    if (kind === 'charge') { const c = find((d.charging || {}).devices); return !c || (!!c.lastCharged && !!v.date && c.lastCharged >= v.date); }
+    if (kind === 'supply') { const s = find((d.supplies || {}).items); return !s || ((s.status || 'ok') === v.status && (!v.lastBought || (!!s.lastBought && s.lastBought >= v.lastBought))); }
+    if (kind === 'card' || kind === 'bill') { const m = find((d.money || {})[kind === 'card' ? 'cards' : 'bills']); return !m || (m.status || 'unpaid') === v.status; }
+    return true; // unknown kind: nothing to sync
+  }
+  async function loadOverrides() {
+    const all = await HQDB.getLocalAll().catch(() => ({}));
+    if (st.data) {
+      const base = Date.parse(st.data.updatedAt || 0) || 0;
+      for (const [k, v] of Object.entries(all)) {
+        if (!v || (v.at || 0) > base) continue;
+        if (reflected(k, v, st.data)) { delete all[k]; await HQDB.delLocal(k).catch(() => {}); }
+        else all[k] = Object.assign({}, v, { keep: true });
+      }
+    }
+    st.overrides = all;
+  }
+  async function setLocal(key, val) { await HQDB.setLocal(key, Object.assign({ at: Date.now() }, val)); await renderPreserving(); }
+  async function delLocal(key) { await HQDB.delLocal(key); await renderPreserving(); }
 
   function pendingChanges() {
     const base = Date.parse((st.data && st.data.updatedAt) || 0) || 0;
     const changes = [];
     for (const [k, v] of Object.entries(st.overrides)) {
-      if (!v || (v.at || 0) <= base) continue;
+      if (!v || ((v.at || 0) <= base && !v.keep)) continue;
       const [kind, id] = [k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 1)];
       const at = new Date(v.at).toISOString();
       if (kind === 'maint') changes.push({ type: 'maintenance.done', id, date: v.lastDone, at });
@@ -169,6 +202,71 @@
       else if (kind === 'card' || kind === 'bill') changes.push({ type: kind + '.status', id, status: v.status, date: v.date, at });
     }
     return changes.sort((a, b) => a.at.localeCompare(b.at));
+  }
+
+  // ================= Auto-refresh =================
+  const hm = ms => new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(ms));
+  function updateSyncInfo() {
+    const t = st.lastSync ? 'Last synced ' + hm(st.lastSync) + ' IST' : '';
+    const txt = st.offline ? ('Offline' + (t ? ' \u00b7 ' + t : ' \u00b7 showing saved data')) : t;
+    for (const id of ['syncInfo', 'syncInfoSettings']) { const e = $(id); if (e) e.textContent = (st.data || st.noData) ? txt : ''; }
+  }
+  let toastTimer = 0;
+  function toast(msg, warn) {
+    const t = $('toast'); t.textContent = msg; t.classList.toggle('warn', !!warn); t.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+  }
+  // Keep the section at the top of the viewport where it was across a re-render (so scroll and active pill stay put).
+  function scrollAnchor() {
+    const off = headerOffset();
+    for (const s of document.querySelectorAll('#dash > .sec')) {
+      if (s.offsetParent === null) continue;
+      const r = s.getBoundingClientRect();
+      if (r.bottom > off) return { id: s.id, top: r.top, y: window.scrollY };
+    }
+    return null;
+  }
+  function restoreAnchor(a) {
+    if (!a || a.y < 1 || nav.lockId) return;
+    const s = $(a.id); if (!s) return;
+    const d = s.getBoundingClientRect().top - a.top;
+    if (Math.abs(d) >= 1) window.scrollBy(0, d);
+  }
+  async function renderPreserving() {
+    const a = scrollAnchor();
+    await renderAll();
+    restoreAnchor(a);
+    updateActivePill();
+  }
+  // Fetch data.enc.json; re-decrypt and re-render only when the ciphertext changed.
+  let refreshing = null, trailing = 0;
+  function refreshData(reason, force) {
+    if (refreshing) return refreshing;
+    const wait = 3000 - (Date.now() - st.lastCheck);
+    if (!force && wait > 0) { // just checked: run one trailing check instead of dropping this trigger
+      if (!trailing) trailing = setTimeout(() => { trailing = 0; refreshData(reason, true); }, wait);
+      return Promise.resolve(false);
+    }
+    refreshing = doRefresh(reason).catch(e => { console.error('refresh failed', e); return false; }).finally(() => { refreshing = null; st.lastCheck = Date.now(); });
+    return refreshing;
+  }
+  async function doRefresh(reason) {
+    if (!st.device) return false;
+    const env = await loadEnvelope();
+    if (st.data && (!env || envFp(env) === envFp(st.env))) { await renderPreserving(); return false; } // offline or unchanged
+    if (!env) return false; // offline / nothing published yet: keep the current screen
+    const prev = st.data, prevEnv = st.env, noData = st.noData;
+    st.env = env;
+    const msg = await tryDecrypt();
+    if (msg) {
+      if (prev || !noData) { await showLock(msg); return false; } // removed / tampered: show nothing, as on a reload
+      st.env = prevEnv; return false;                              // "alerts only" mode: stay there
+    }
+    if (!prev) { await openDashboard(); if (reason !== 'load') toast('Updated just now'); return true; }
+    await renderPreserving();
+    if (prev.updatedAt !== st.data.updatedAt || envFp(prevEnv) !== envFp(env)) toast('Updated just now');
+    document.body.dataset.refreshed = String(Date.now()); // marker for the headless test
+    return true;
   }
 
   // ================= Render: sections =================
@@ -317,6 +415,7 @@
     $('s-today').classList.toggle('hidden', !st.data);
     for (const id of ['s-money', 's-family', 's-charging', 's-home', 's-supplies', 's-sync']) $(id).classList.toggle('hidden', !st.data);
     await renderAlerts();
+    updateSyncInfo();
   }
 
   // ================= Alerts history (push) =================
@@ -393,7 +492,17 @@
   }
   async function registerSW() {
     if (!('serviceWorker' in navigator)) return null;
-    reg = await navigator.serviceWorker.register('./sw.js', { scope: './' });
+    // updateViaCache:'none': sw.js and its imports are always revalidated, so a new version is found quickly.
+    const hadController = !!navigator.serviceWorker.controller;
+    reg = await navigator.serviceWorker.register('./sw.js', { scope: './', updateViaCache: 'none' });
+    // The new SW calls skipWaiting + clients.claim; when it takes over, reload once (now, or when next visible).
+    let reloading = false;
+    const reloadNow = () => { if (!reloading) { reloading = true; location.reload(); } };
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController) return; // first install: nothing old is running
+      if (document.hidden) document.addEventListener('visibilitychange', () => { if (!document.hidden) reloadNow(); }, { once: true });
+      else reloadNow();
+    });
     await navigator.serviceWorker.ready;
     return reg;
   }
@@ -541,16 +650,24 @@
       navigator.serviceWorker.addEventListener('message', ev => {
         const d = ev.data || {};
         if (d.kind === 'alert' || d.kind === 'focus-alert') { const id = d.kind === 'alert' ? d.alert && d.alert.id : d.id; if (st.data || st.noData) renderAlerts(id); else st.flashId = id; }
+        if (d.kind === 'alert' || d.kind === 'focus-alert' || d.kind === 'refresh-data') refreshData('push', true); // a push usually means new data
         else if (d.kind === 'sub-changed') { refreshSetup(); refreshEnroll(); }
       });
     }
     // No auto-lock and no prompt: an enrolled device opens the data directly until 🔒 Lock / Forget this device.
-    document.addEventListener('visibilitychange', () => {
+    // Auto-refresh: when visible again, on focus / bfcache restore / back online, and every 60 s while visible.
+    // (Also picks up "maybe the assistant has published for this device meanwhile" on the enroll screen.)
+    let lastSwCheck = 0;
+    const onVisible = reason => {
       if (document.hidden) return;
-      if (st.data || st.noData) renderAll();
-      else if (st.device) unlockFlow(); // maybe the assistant has published for this device meanwhile
-    });
-    setInterval(() => { if (st.data && !document.hidden) renderAll(); }, 60000);
+      refreshData(reason);
+      if (reg && Date.now() - lastSwCheck > 10 * 60000) { lastSwCheck = Date.now(); reg.update().catch(() => {}); }
+    };
+    document.addEventListener('visibilitychange', () => onVisible('visible'));
+    addEventListener('focus', () => onVisible('focus'));
+    addEventListener('pageshow', ev => { if (ev.persisted) onVisible('pageshow'); });
+    addEventListener('online', () => onVisible('online'));
+    setInterval(() => { if (!document.hidden) refreshData('poll'); }, 60000);
   }
 
   async function init() {
@@ -561,12 +678,14 @@
     if (st.flashId) history.replaceState(null, '', location.pathname + location.search);
     await HQDB.delMeta('rememberedKey').catch(() => {}); // v1 leftover (password-derived key), no longer used
     $('deviceName').value = (await HQDB.getMeta('deviceName').catch(() => null)) || '';
+    st.lastSync = (await HQDB.getMeta('lastSync').catch(() => 0)) || 0;
     st.device = await loadDevice();
     if (!st.device) {
       // First run: create this device's key pair automatically.
       try { st.device = await createDevice(); } catch (e) { banner('⚠️ Could not create a device key: ' + e.message); }
     }
     await unlockFlow();
+    st.lastCheck = Date.now();
   }
 
   init();

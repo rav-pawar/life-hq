@@ -42,6 +42,7 @@
         <button id="forgetBtn" class="btn">🔒 Lock / Forget this device</button>
       </div>
       <p id="status" class="muted small"></p>
+      <p id="syncInfoSettings" class="muted small sync-info"></p>
     </section>
 
     <!-- Subscription display -->
@@ -144,7 +145,8 @@
     </div>
   </main>
 
-  <footer class="foot muted small">Data encrypted to each enrolled device's own key, decrypted only on the device. Push messages are end-to-end encrypted and never contain amounts.</footer>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <footer class="foot muted small"><span id="syncInfo" class="sync-info"></span><br>Data encrypted to each enrolled device's own key, decrypted only on the device. Push messages are end-to-end encrypted and never contain amounts.</footer>
 
   <script src="config.js"></script>
   <script src="db.js"></script>

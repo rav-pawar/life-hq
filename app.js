@@ -99,6 +99,8 @@
     refreshEnroll();
     await renderAll();
     if (st.flashId) { await renderAlerts(st.flashId); st.flashId = null; }
+    else if (location.hash.startsWith('#s-')) scrollToSection(location.hash.slice(1), false); // deep link: the section exists only now
+    updateActivePill();
     document.body.dataset.view = 'dashboard';
   }
 
@@ -451,7 +453,69 @@
   }
 
   // ================= Wiring =================
+  // ---- Section navigation: header pills scroll to their section (offset by the sticky header via CSS
+  // scroll-margin-top) and the pill of the section in view is highlighted.
+  const nav = { links: [], lockId: null, lockTimer: 0, raf: 0 };
+  function headerOffset() { const h = document.querySelector('.topbar'); return (h ? h.getBoundingClientRect().height : 0) + 16; }
+  function setActivePill(id) {
+    for (const a of nav.links) {
+      const on = a.getAttribute('href') === '#' + id;
+      a.classList.toggle('active', on);
+      if (on) a.setAttribute('aria-current', 'location'); else a.removeAttribute('aria-current');
+      if (on) {
+        // Keep the active pill visible inside the horizontally scrolling pill row (without moving the page).
+        const bar = $('tabs'), l = a.offsetLeft - bar.offsetLeft, r = l + a.offsetWidth;
+        if (l < bar.scrollLeft + 8 || r > bar.scrollLeft + bar.clientWidth - 8) bar.scrollTo({ left: l - (bar.clientWidth - a.offsetWidth) / 2, behavior: 'smooth' });
+      }
+    }
+  }
+  function updateActivePill() {
+    nav.raf = 0;
+    if ($('dash').classList.contains('hidden') || !nav.links.length) return;
+    if (nav.lockId) { setActivePill(nav.lockId); return; }
+    const off = headerOffset() + 8;
+    let cur = null;
+    for (const a of nav.links) {
+      const sec = $(a.getAttribute('href').slice(1));
+      if (sec && sec.offsetParent !== null && sec.getBoundingClientRect().top <= off) cur = sec.id;
+    }
+    setActivePill(cur || nav.links[0].getAttribute('href').slice(1));
+  }
+  function scrollToSection(id, smooth) {
+    const sec = $(id);
+    if (!sec || $('dash').classList.contains('hidden')) return;
+    const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // Hold the clicked pill active while the smooth scroll runs (a short last section may never reach the top).
+    nav.lockId = id; clearTimeout(nav.lockTimer);
+    setActivePill(id);
+    sec.scrollIntoView({ behavior: smooth && !reduce ? 'smooth' : 'auto', block: 'start' });
+    nav.lockTimer = setTimeout(() => { nav.lockId = null; }, smooth ? 900 : 50);
+  }
+  function wireNav() {
+    nav.links = Array.from(document.querySelectorAll('#tabs a[href^="#s-"]'));
+    for (const a of nav.links) {
+      a.addEventListener('click', ev => {
+        ev.preventDefault();
+        const id = a.getAttribute('href').slice(1);
+        history.replaceState(null, '', location.pathname + location.search + '#' + id);
+        scrollToSection(id, true);
+      });
+    }
+    const brand = document.querySelector('.topbar .brand');
+    if (brand) brand.addEventListener('click', ev => {
+      ev.preventDefault();
+      if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+    // Manual scrolling (wheel / touch / keys) releases the click lock straight away.
+    for (const t of ['wheel', 'touchstart', 'keydown']) addEventListener(t, () => { if (nav.lockId) { nav.lockId = null; clearTimeout(nav.lockTimer); } }, { passive: true });
+    addEventListener('scroll', () => { if (!nav.raf) nav.raf = requestAnimationFrame(updateActivePill); }, { passive: true });
+    addEventListener('resize', () => { if (!nav.raf) nav.raf = requestAnimationFrame(updateActivePill); }, { passive: true });
+    addEventListener('hashchange', () => { if (location.hash.startsWith('#s-')) scrollToSection(location.hash.slice(1), false); });
+  }
+
   function wire() {
+    wireNav();
     $('lockBtn').addEventListener('click', forgetDevice);
     $('forgetBtn').addEventListener('click', forgetDevice);
     $('newKeyBtn').addEventListener('click', newKey);

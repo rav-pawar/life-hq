@@ -2,7 +2,7 @@
    The encrypted data file is fetched network-first; plaintext is never cached. */
 importScripts('./config.js', './db.js');
 
-const CACHE = 'life-hq-v3'; // v3: per-device public-key encryption (data format v2)
+const CACHE = 'life-hq-v4'; // v4: single-row header + sticky nav fixes (v3: per-device public-key encryption, data format v2)
 const SHELL = [
   './', './index.html', './styles.css', './app.js', './db.js', './config.js', './logic.js', './crypto.js',
   './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'

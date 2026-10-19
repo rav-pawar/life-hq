@@ -5,16 +5,10 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; background: var(--bg); color: var(--text);
+html, body { margin: 0; max-width: 100%; background: var(--bg); color: var(--text);
   font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif; }
 body { padding-bottom: env(safe-area-inset-bottom); }
 .hidden { display: none !important; }
-.topbar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px;
-  padding: calc(10px + env(safe-area-inset-top)) 16px 10px; background: rgba(17,19,26,.92);
-  backdrop-filter: blur(8px); border-bottom: 1px solid #222634; }
-.topbar h1 { font-size: 1.2rem; margin: 0; flex: 1; }
-.logo { width: 32px; height: 32px; border-radius: 8px; }
-.icon-btn { background: none; border: 0; font-size: 1.4rem; padding: 6px; color: var(--text); cursor: pointer; }
 main { max-width: 680px; margin: 0 auto; padding: 12px 14px 24px; }
 h2 { font-size: 1.05rem; margin: 0 0 8px; }
 .card { background: var(--card); border-radius: var(--radius); padding: 16px; margin: 0 0 14px; border: 1px solid #262a38; }
@@ -59,13 +53,7 @@ details li { margin: 4px 0; word-break: break-word; }
 
 /* ---- Life HQ additions ---- */
 :root { --amber: #f0a830; --amber-bg: #2e2410; --amber-border: #6b5a1c; }
-.tabs { position: sticky; top: 52px; z-index: 4; display: flex; gap: 6px; overflow-x: auto; padding: 8px 12px;
-  background: rgba(17,19,26,.95); border-bottom: 1px solid #222634; scrollbar-width: none; }
-.tabs::-webkit-scrollbar { display: none; }
-.tabs a { flex: none; color: var(--text); text-decoration: none; background: var(--card2); border: 1px solid #343a4f;
-  padding: 6px 12px; border-radius: 999px; font-size: .9rem; }
-.sec { scroll-margin-top: 110px; }
-.lock { margin-top: 24px; }
+.lock { margin-top: 8px; }
 .lock input[type=text] { width: 100%; padding: 14px; font-size: 1.1rem; border-radius: 10px; border: 1px solid #343a4f;
   background: #0c0e14; color: var(--text); margin: 8px 0; }
 .check { display: flex; gap: 8px; align-items: center; margin: 6px 0; color: var(--muted); font-size: .9rem; }
@@ -93,3 +81,47 @@ details li { margin: 4px 0; word-break: break-word; }
 .tasks li.red { color: #ff9a9a; }
 .note { background: #142033; border: 1px solid #27406b; color: #cfe0ff; border-radius: 10px; padding: 8px 12px; font-size: .9rem; margin: 0 0 10px; }
 #s-sync h2 { display: flex; align-items: center; gap: 8px; }
+
+/* ---- Header: one sticky, fully opaque row (brand | section pills | actions) ---- */
+:root { --header-h: 56px; --header-total: calc(var(--header-h) + env(safe-area-inset-top)); --gap: 12px; }
+html { -webkit-text-size-adjust: 100%; }
+.topbar { position: sticky; top: 0; z-index: 100; display: flex; align-items: center; gap: 12px;
+  height: var(--header-total); padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left));
+  background: var(--bg); border-bottom: 1px solid #222634; box-shadow: 0 2px 10px rgba(0, 0, 0, .35); isolation: isolate; }
+.brand { display: flex; align-items: center; gap: 10px; flex: none; min-width: 0; color: inherit; text-decoration: none; border-radius: 10px; }
+.brand h1 { font-size: 1.15rem; margin: 0; white-space: nowrap; }
+.logo { width: 32px; height: 32px; border-radius: 8px; flex: none; display: block; }
+.actions { display: flex; align-items: center; gap: 2px; flex: none; margin-left: auto; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0;
+  background: none; border: 0; border-radius: 10px; font-size: 1.3rem; line-height: 1; color: var(--text); cursor: pointer; }
+.icon-btn:hover { background: var(--card2); }
+.tabs { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; height: 100%;
+  overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: none; -ms-overflow-style: none;
+  padding: 0 8px; scroll-padding-inline: 24px;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 8px, #000 calc(100% - 8px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 8px, #000 calc(100% - 8px), transparent); }
+.tabs::-webkit-scrollbar { display: none; }
+/* Centre the pills when they fit; when they overflow, auto margins collapse so nothing is cut off on the left. */
+.tabs a:first-child { margin-left: auto; }
+.tabs a:last-child { margin-right: auto; }
+.tabs a { flex: none; color: var(--text); text-decoration: none; background: var(--card2); border: 1px solid #343a4f;
+  padding: 6px 12px; border-radius: 999px; font-size: .9rem; line-height: 1.2; white-space: nowrap; }
+.tabs a:hover { border-color: #4a5170; }
+.tabs a.active { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; }
+.tabs a:focus-visible, .brand:focus-visible, .icon-btn:focus-visible { outline: 2px solid #8fb6ff; outline-offset: 1px; }
+/* Anchor / scrollIntoView targets stop just below the sticky header. */
+.sec, main > .card { scroll-margin-top: calc(var(--header-total) + var(--gap)); }
+#dash > .sec:first-child .section-head { margin-top: 6px; }
+main { padding-top: 16px; }
+main > *, #dash > * { min-width: 0; max-width: 100%; }
+@media (max-width: 640px) {
+  :root { --header-h: 52px; }
+  .topbar { gap: 8px; padding-left: max(10px, env(safe-area-inset-left)); padding-right: max(6px, env(safe-area-inset-right)); }
+  .brand h1 { display: none; }   /* icon only on phones */
+  .logo { width: 28px; height: 28px; }
+  .icon-btn { width: 36px; height: 36px; font-size: 1.15rem; }
+  .actions { gap: 0; }
+  .tabs a { padding: 6px 10px; font-size: .85rem; }
+  main { padding-left: 12px; padding-right: 12px; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }

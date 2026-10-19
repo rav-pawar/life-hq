@@ -533,6 +533,54 @@
     $('homeList').replaceChildren(...out);
   }
 
+
+  function renderFestivals(today) {
+    const active = L.activeFestivals(st.data, today);
+    const upcoming = L.upcomingFestivals(st.data, today);
+    const out = [];
+    for (const info of active) {
+      const f = info.fest;
+      const card = el('div', 'item fest-card active');
+      card.appendChild(el('p', 'fest-title', `${f.emoji || '🎉'} ${f.name}`));
+      const dayLine = info.totalDays > 1
+        ? `${info.label} · Day ${info.dayNum} of ${info.totalDays}`
+        : info.label;
+      const note = info.note ? ` · ${info.note}` : '';
+      card.appendChild(el('p', 'fest-meta', dayLine + note));
+      const bar = el('div', 'fest-progress');
+      const fill = el('span');
+      fill.style.width = Math.round(info.progress * 100) + '%';
+      bar.appendChild(fill);
+      card.appendChild(bar);
+      const trivia = L.festivalTriviaToday(f, today);
+      if (trivia.length) {
+        const ul = el('ul', 'fest-trivia');
+        trivia.forEach(tr => {
+          const li = el('li', null, tr.text);
+          if (tr.eveningHint) {
+            li.appendChild(document.createTextNode(' '));
+            li.appendChild(el('span', 'hint', '(after evening)'));
+          }
+          ul.appendChild(li);
+        });
+        card.appendChild(ul);
+      } else {
+        card.appendChild(el('p', 'muted small', 'No local trivia for today.'));
+      }
+      out.push(card);
+    }
+    for (const u of upcoming) {
+      const f = u.fest;
+      const card = el('div', 'item fest-card compact');
+      card.appendChild(el('p', 'fest-title', `${f.emoji || '🎉'} ${f.name}`));
+      card.appendChild(el('p', 'fest-meta',
+        `Starts ${L.fmtDate(f.start)} (${L.relDays(u.daysUntil)}) · ${u.totalDays} day${u.totalDays === 1 ? '' : 's'} through ${L.fmtDate(f.end)}`));
+      out.push(card);
+    }
+    if (!out.length) out.push(el('p', 'empty', 'No active or upcoming festivals in the next 3 weeks.'));
+    $('festivalsList').replaceChildren(...out);
+  }
+
   function renderSupplies(today) {
     const items = L.supplyItems(st.data, st.overrides, today);
     const out = items.map(it => {
@@ -585,12 +633,12 @@
     await loadOverrides();
     if (st.data) {
       const now = nowMs(), today = L.istDate(now);
-      const parts = [() => renderToday(now, today), () => renderMoney(today), () => renderFamily(now, today), () => renderCharging(now, today),
-        () => renderHome(today), () => renderSupplies(today), renderSync];
+      const parts = [() => renderToday(now, today), () => renderMoney(today), () => renderFamily(now, today), () => renderFestivals(today),
+        () => renderCharging(now, today), () => renderHome(today), () => renderSupplies(today), renderSync];
       for (const p of parts) { try { p(); } catch (e) { console.error(e); banner('⚠️ Some data could not be shown: ' + e.message); } }
     }
     $('s-today').classList.toggle('hidden', !st.data);
-    for (const id of ['s-money', 's-family', 's-charging', 's-home', 's-supplies', 's-sync']) $(id).classList.toggle('hidden', !st.data);
+    for (const id of ['s-money', 's-family', 's-festivals', 's-charging', 's-home', 's-supplies', 's-sync']) $(id).classList.toggle('hidden', !st.data);
     await renderAlerts();
     updateSyncInfo();
   }

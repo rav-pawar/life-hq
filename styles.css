@@ -151,3 +151,15 @@ main > *, #dash > * { min-width: 0; max-width: 100%; }
 .sync-list li span:first-child { min-width: 0; overflow-wrap: anywhere; }
 .pill.blue { background: #16284a; color: #9cc0ff; }
 .applied { color: #7ee2a8; margin: 4px 0; }
+
+/* ---- Festivals ---- */
+.fest-card { border-left: 5px solid #c9892e; }
+.fest-card.active { background: #2a2214; border-color: #6b4e1c; border-left-color: #e8b84a; }
+.fest-card .fest-title { font-weight: 700; margin: 0 0 4px; font-size: 1.05rem; }
+.fest-card .fest-meta { margin: 0 0 8px; color: var(--muted); font-size: .9rem; }
+.fest-progress { height: 6px; background: #0c0e14; border-radius: 999px; overflow: hidden; margin: 0 0 10px; }
+.fest-progress > span { display: block; height: 100%; background: linear-gradient(90deg, #c9892e, #e8b84a); border-radius: 999px; }
+.fest-trivia { margin: 0; padding-left: 18px; }
+.fest-trivia li { margin: 4px 0; font-size: .92rem; }
+.fest-trivia .hint { color: var(--muted); font-size: .85rem; }
+.fest-card.compact .fest-title { font-size: .98rem; font-weight: 600; }

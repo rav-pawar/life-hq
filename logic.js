@@ -143,6 +143,63 @@
     });
   }
 
+
+  // ---- Festivals ----
+  const UPCOMING_FESTIVAL_DAYS = 21;
+
+  function festivalList(data) {
+    return (((data || {}).festivals || {}).items) || [];
+  }
+
+  function festivalDayInfo(fest, today) {
+    if (!fest || !isYMD(fest.start) || !isYMD(fest.end) || !isYMD(today)) return null;
+    if (today < fest.start || today > fest.end) return null;
+    const dayNum = daysBetween(fest.start, today) + 1;
+    const totalDays = daysBetween(fest.start, fest.end) + 1;
+    const named = (fest.days || []).find(d => d && d.date === today);
+    const label = (named && named.label) || `Day ${dayNum}`;
+    return {
+      fest, dayNum, totalDays, label,
+      note: named && named.note ? named.note : null,
+      isFirst: today === fest.start,
+      isLast: today === fest.end,
+      progress: totalDays > 0 ? dayNum / totalDays : 1,
+    };
+  }
+
+  function festivalTriviaToday(fest, today) {
+    if (!fest || !isYMD(today)) return [];
+    const info = festivalDayInfo(fest, today);
+    if (!info) return [];
+    const out = [];
+    for (const t of (fest.trivia || [])) {
+      if (!t || !t.text) continue;
+      const when = t.when || 'always';
+      let show = false;
+      if (when === 'always' || when === 'evening') show = true;
+      else if (when === 'first') show = info.isFirst;
+      else if (when === 'last') show = info.isLast;
+      else if (when === 'dates') show = Array.isArray(t.dates) && t.dates.includes(today);
+      if (!show) continue;
+      out.push({ id: t.id || null, text: t.text, when, eveningHint: when === 'evening' });
+    }
+    return out;
+  }
+
+  function activeFestivals(data, today) {
+    return festivalList(data).filter(f => isYMD(f.start) && isYMD(f.end) && today >= f.start && today <= f.end)
+      .map(f => festivalDayInfo(f, today)).filter(Boolean)
+      .sort((a, b) => a.fest.start.localeCompare(b.fest.start) || a.fest.id.localeCompare(b.fest.id));
+  }
+
+  function upcomingFestivals(data, today, withinDays) {
+    const lim = withinDays == null ? UPCOMING_FESTIVAL_DAYS : withinDays;
+    const until = addDays(today, lim);
+    return festivalList(data).filter(f => isYMD(f.start) && f.start > today && f.start <= until)
+      .sort((a, b) => a.start.localeCompare(b.start))
+      .map(f => ({ fest: f, daysUntil: daysBetween(today, f.start), totalDays: daysBetween(f.start, f.end) + 1 }));
+  }
+
   // ---- Today (dashboard) ----
   function todayItems(data, overrides, nowMs) {
     const today = istDate(nowMs), nowMin = istMinutes(nowMs);
@@ -174,6 +231,11 @@
     if (wk.isToday && wk.tasks.length) out.push({ sev: 'urgent', section: 'home', text: `🧰 Maintenance weekend today: ${wk.tasks.length} task${wk.tasks.length === 1 ? '' : 's'}` });
     for (const it of supplyItems(data, overrides, today).filter(i => i.flagged)) {
       out.push({ sev: it.status === 'out' ? 'urgent' : 'warn', section: 'supplies', text: `${it.name}: ${it.status === 'out' ? 'out' : it.status === 'low' ? 'low' : 'running low soon'}` });
+    }
+    for (const info of activeFestivals(data, today)) {
+      const trivia = festivalTriviaToday(info.fest, today);
+      const tip = trivia.length ? ' · ' + trivia[0].text : '';
+      out.push({ sev: 'info', section: 'festivals', text: `${info.fest.emoji || '🎉'} ${info.fest.name}: ${info.label}${tip}` });
     }
     const rank = { urgent: 0, warn: 1, info: 2, past: 3 };
     return out.sort((a, b) => rank[a.sev] - rank[b.sev]);
@@ -227,6 +289,7 @@
 
   g.LifeLogic = { istDate, istMinutes, istWeekday, addDays, daysBetween, weekdayOf, hhmmToMin, fmtTime, fmtDate, relDays, isYMD,
     settingsOf, nextMaintenanceSaturday, isMaintenanceSaturday, maintenanceTasks, maintenanceWeekend, moneyItems, schoolDay,
-    chargingDevices, supplyItems, todayItems, dueAlerts, sensitiveReason };
+    chargingDevices, supplyItems, festivalDayInfo, festivalTriviaToday, activeFestivals, upcomingFestivals,
+    todayItems, dueAlerts, sensitiveReason };
   if (typeof module === 'object' && module.exports) module.exports = g.LifeLogic;
 })(typeof self !== 'undefined' ? self : globalThis);

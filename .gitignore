@@ -1,0 +1,17 @@
+# Never commit secrets or plaintext personal data
+data.json
+**/data.json
+vapid*
+subscriptions*
+*.pem
+.env
+.env.*
+.imp-alerts/
+.life-hq/
+node_modules/
+.DS_Store
+
+# v2 secrets (device registry, old KDF salt, push dedupe state)
+devices*.json
+kdf.json
+notify-state.json

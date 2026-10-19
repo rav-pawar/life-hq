@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; manifest-src 'self'; worker-src 'self'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#11131a">
+  <meta name="description" content="Life HQ: personal dashboard and important alerts">
+  <title>Life HQ</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <img src="icons/icon-192.png" alt="" class="logo">
+    <h1>Life HQ</h1>
+    <button id="lockBtn" class="icon-btn" aria-label="Lock / Forget this device" title="Lock / Forget this device">🔒</button>
+    <button id="menuBtn" class="icon-btn" aria-label="Settings" aria-expanded="false">⚙️</button>
+  </header>
+
+  <nav id="tabs" class="tabs hidden" aria-label="Sections">
+    <a href="#s-today">Today</a><a href="#s-money">Money</a><a href="#s-family">Family</a><a href="#s-charging">Charging</a><a href="#s-home">Home</a><a href="#s-supplies">Supplies</a><a href="#s-alerts">Alerts</a>
+  </nav>
+
+  <main>
+    <div id="banner" class="banner hidden" role="status"></div>
+
+    <!-- Settings panel (available before enrollment too, for notification setup) -->
+    <section id="settings" class="card hidden">
+      <h2>Settings</h2>
+      <div class="row-btns">
+        <button id="enableBtn2" class="btn">🔔 Enable notifications</button>
+        <button id="showSubBtn" class="btn">Show my enrollment code again</button>
+        <button id="testBtn" class="btn">Test notification (local)</button>
+        <button id="clearBtn" class="btn">🧹 Clear old alerts</button>
+        <button id="forgetBtn" class="btn">🔒 Lock / Forget this device</button>
+      </div>
+      <p id="status" class="muted small"></p>
+    </section>
+
+    <!-- Subscription display -->
+    <section id="subBox" class="card hidden">
+      <h2>Your enrollment code</h2>
+      <p class="instruction">Paste this to your assistant in chat</p>
+      <p class="muted small">Contains this device's public key, its name and its push subscription. No secrets: the private key never leaves this device.</p>
+      <textarea id="subJson" readonly rows="7" spellcheck="false"></textarea>
+      <button id="copyBtn" class="btn primary big">📋 Copy</button>
+      <button id="hideSubBtn" class="btn ghost">Done</button>
+    </section>
+
+    <!-- Enroll screen (shown until this device is a recipient of the published data) -->
+    <section id="lock" class="card lock">
+      <h2>🔐 Enroll this device</h2>
+      <p id="lockMsg" class="lock-msg" role="alert"></p>
+      <p class="muted small">Life HQ data is encrypted separately for each enrolled device. This device has its own key pair; the private key
+        is locked inside this browser and can never be copied out. Only the public key below is shared.</p>
+      <div id="enrollBox">
+        <label class="field-label" for="deviceName">Device name</label>
+        <input id="deviceName" type="text" maxlength="40" placeholder="e.g. Pixel phone, Acer Chrome" autocomplete="off" spellcheck="false">
+        <p class="muted small">Fingerprint: <span id="deviceKid" class="fp"></span></p>
+        <p class="instruction">Paste this to your assistant in chat</p>
+        <textarea id="enrollJson" readonly rows="7" spellcheck="false"></textarea>
+        <button id="copyEnrollBtn" class="btn primary big">📋 Copy</button>
+        <p class="muted small">Tip: tap 🔔 <b>Enable notifications</b> first, so the code also carries this device's push subscription (one paste does both).
+          After your assistant publishes, reopen the app.</p>
+        <button id="retryBtn" class="btn">🔄 Check again</button>
+      </div>
+      <button id="newKeyBtn" class="btn primary big hidden">🔑 Create this device's key</button>
+      <button id="noDataBtn" class="btn ghost hidden">Continue without data (alerts only)</button>
+    </section>
+
+    <!-- Setup (notifications) -->
+    <section id="setup" class="card setup hidden">
+      <h2>Set up notifications</h2>
+      <p class="muted">Turn on push so urgent items (bills, school runs, charging, maintenance, supplies) reach this phone.</p>
+      <ol class="steps muted">
+        <li>Tap <b>Enable notifications</b> and allow.</li>
+        <li>Copy the enrollment code that appears (it includes the subscription).</li>
+        <li>Paste it to your assistant in chat once.</li>
+      </ol>
+      <button id="enableBtn" class="btn primary big">🔔 Enable notifications</button>
+      <p class="muted small">Tip: in Chrome, use ⋮ → <b>Add to Home screen</b> / <b>Install app</b>.</p>
+    </section>
+
+    <div id="dash" class="hidden">
+      <section id="s-today" class="sec">
+        <div class="section-head"><h2>📅 Today</h2><span id="todayDate" class="muted small"></span></div>
+        <div id="todayList" class="list"></div>
+      </section>
+
+      <section id="s-money" class="sec">
+        <div class="section-head"><h2>💳 Money</h2></div>
+        <div id="moneyList" class="list"></div>
+      </section>
+
+      <section id="s-family" class="sec">
+        <div class="section-head"><h2>🏫 Family / school</h2></div>
+        <div id="familyList" class="list"></div>
+      </section>
+
+      <section id="s-charging" class="sec">
+        <div class="section-head"><h2>🔌 Charging</h2></div>
+        <div id="chargingList" class="list"></div>
+      </section>
+
+      <section id="s-home" class="sec">
+        <div class="section-head"><h2>🧰 Home maintenance</h2></div>
+        <div id="weekendBox"></div>
+        <div id="homeList" class="list"></div>
+      </section>
+
+      <section id="s-supplies" class="sec">
+        <div class="section-head"><h2>🛒 Supplies / pantry</h2></div>
+        <p class="note">🛍️ Nothing is ordered automatically: your assistant always asks Ravindra first. Intervals marked “est.” are estimates.</p>
+        <div id="suppliesList" class="list"></div>
+      </section>
+
+      <section id="s-alerts" class="sec">
+        <div class="section-head"><h2>🚨 Alerts: urgent / pending</h2><span id="urgentCount" class="pill red">0</span></div>
+        <div id="urgentList" class="list"></div>
+        <p id="urgentEmpty" class="empty">Nothing urgent. 🎉</p>
+        <div class="section-head"><h2>📋 Summaries</h2><button id="clearBtn2" class="btn ghost small">Clear old</button></div>
+        <div id="summaryList" class="list"></div>
+        <p id="summaryEmpty" class="empty">No summaries yet.</p>
+        <div id="infoSection" class="hidden">
+          <div class="section-head"><h2>ℹ️ Other</h2></div>
+          <div id="infoList" class="list"></div>
+        </div>
+      </section>
+
+      <section id="s-sync" class="card sec">
+        <h2>🔄 Changes to sync <span id="syncCount" class="pill">0</span></h2>
+        <p class="muted small">Taps (done, charged, low, paid…) stay on this device. Copy this and paste it to your assistant so they can be saved into your data.</p>
+        <textarea id="syncJson" readonly rows="6" spellcheck="false"></textarea>
+        <button id="copySyncBtn" class="btn primary">📋 Copy changes</button>
+        <p id="dataInfo" class="muted small"></p>
+      </section>
+    </div>
+  </main>
+
+  <footer class="foot muted small">Data encrypted to each enrolled device's own key, decrypted only on the device. Push messages are end-to-end encrypted and never contain amounts.</footer>
+
+  <script src="config.js"></script>
+  <script src="db.js"></script>
+  <script src="logic.js"></script>
+  <script src="crypto.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

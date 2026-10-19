@@ -1,0 +1,10 @@
+{
+  "name": "life-hq-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Life HQ: encrypt, publish, safety check and push sender (code only, no secrets)",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "web-push": "^3.6.7"
+  }
+}

@@ -2,7 +2,7 @@
    The encrypted data file is fetched network-first; plaintext is never cached. */
 importScripts('./config.js', './db.js');
 
-const CACHE = 'life-hq-v6'; // v6: sync back (encrypted inbox); v5: auto-refresh + network-first data (v4: single-row header; v3: per-device keys, data v2)
+const CACHE = 'life-hq-v7'; // v7: sync token auto-provisioned from the encrypted data; v6: sync back (encrypted inbox); v5: auto-refresh + network-first data (v4: single-row header; v3: per-device keys, data v2)
 const DATA_KEY = new URL('./data.enc.json', self.registration.scope).href; // cached without the cache-busting query
 const SHELL = [
   './', './index.html', './styles.css', './app.js', './db.js', './config.js', './logic.js', './crypto.js',

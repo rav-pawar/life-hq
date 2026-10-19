@@ -121,6 +121,7 @@
     try {
       st.data = await LifeCrypto.decryptForDevice(st.env, st.device);
       st.noData = false;
+      await provisionToken().catch(e => console.error('sync provisioning failed', e));
       persistStorage();
       return '';
     } catch (e) {
@@ -238,13 +239,31 @@
     } catch (e) { sync.token = null; }
     return sync.token;
   }
-  async function saveToken(t) {
+  // Token source: 'auto' (delivered inside this device's encrypted data, payload.sync.inboxToken) or 'manual' (pasted
+  // in Settings; overrides auto). Remove in Settings turns auto-provisioning off on this device ('syncAutoOff').
+  sync.source = null; sync.autoOff = false;
+  async function loadTokenMeta() {
+    sync.source = (await HQDB.getMeta('syncTokenSource').catch(() => null)) || null;
+    sync.autoOff = !!(await HQDB.getMeta('syncAutoOff').catch(() => false));
+  }
+  const autoToken = () => { const s = st.data && st.data.sync; return s && typeof s.inboxToken === 'string' && /^(github_pat_|ghp_)[A-Za-z0-9_]{20,}$/.test(s.inboxToken) ? s.inboxToken : null; };
+  // Called after every successful decrypt.
+  async function provisionToken() {
+    if (!st.data || sync.autoOff) return;
+    const t = autoToken(), cur = await getToken();
+    if (sync.source === 'manual' && cur) return;                       // manual token wins
+    if (t && t !== cur) { await saveToken(t, 'auto'); sync.lastError = ''; scheduleSync(1000); }
+    else if (!t && cur && sync.source === 'auto') await removeToken();  // box stopped delivering it: revoke locally
+  }
+  async function saveToken(t, source) {
     let key = await HQDB.getMeta('syncTokenKey').catch(() => null);
     if (!key) { key = await LifeCrypto.newSealKey(); await HQDB.setMeta('syncTokenKey', key); }
     await HQDB.setMeta('syncToken', await LifeCrypto.seal(key, t));
-    sync.token = t;
+    await HQDB.setMeta('syncTokenSource', source || 'manual');
+    sync.token = t; sync.source = source || 'manual';
   }
-  async function removeToken() { await HQDB.delMeta('syncToken').catch(() => {}); await HQDB.delMeta('syncTokenKey').catch(() => {}); sync.token = null; }
+  async function removeToken() { for (const k of ['syncToken', 'syncTokenKey', 'syncTokenSource']) await HQDB.delMeta(k).catch(() => {}); sync.token = null; sync.source = null; }
+  async function setAutoOff(v) { sync.autoOff = !!v; await HQDB.setMeta('syncAutoOff', !!v).catch(() => {}); }
   function ghFetch(method, path, token, body) {
     return fetch(INBOX_API + path, { method, cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer',
       headers: Object.assign({ Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
@@ -260,14 +279,16 @@
     const queued = pendingEntries().filter(e => !(sync.sent[e.key] && sync.sent[e.key].at === e.v.at)).length;
     let t;
     if (!syncReady()) t = 'Automatic sync is not configured in this build; use Copy changes.';
-    else if (!token) t = 'Automatic sync is off: set a sync token in ⚙️ Settings, or use Copy changes.';
+    else if (!token) t = sync.autoOff ? 'Automatic sync is off on this device (⚙️ Settings → Use automatic sync), or use Copy changes.' : 'Automatic sync is not connected yet (it connects with the next data update), or use Copy changes.';
     else if (sync.lastError) t = '⚠️ Sync failed: ' + sync.lastError + (queued ? ' · will retry' : '');
     else if (queued) t = navigator.onLine ? `Sending ${queued} change${queued === 1 ? '' : 's'} shortly…` : `Offline: ${queued} queued, will send when back online`;
     else t = sync.lastOk ? 'Automatic sync on · last sent ' + hm(sync.lastOk) + ' IST' : 'Automatic sync on';
     $('syncState').textContent = t;
-    $('tokenState').textContent = token ? 'set ✓' : 'not set';
+    $('tokenState').textContent = token ? (sync.source === 'auto' ? 'connected automatically ✓' : 'connected (manual token) ✓')
+      : sync.autoOff ? 'off on this device' : 'not connected yet';
     $('tokenForm').classList.toggle('hidden', !!token);
     $('removeTokenBtn').classList.toggle('hidden', !token);
+    $('autoSyncBtn').classList.toggle('hidden', !(sync.autoOff || (sync.source === 'manual' && token)));
     $('testSyncBtn').disabled = !token || !syncReady();
   }
   function scheduleSync(delay) {
@@ -313,15 +334,23 @@
       try { const r = await ghFetch('GET', '', t); ok = r.ok; if (!ok) $('syncStatus').textContent = '⚠️ ' + httpMsg(r.status) + '. Not saved.'; }
       catch (e) { $('syncStatus').textContent = '⚠️ Could not reach GitHub (' + e.message + '). Not saved.'; }
       if (!ok) return;
-      await saveToken(t); $('tokenInput').value = '';
+      await saveToken(t, 'manual'); await setAutoOff(false); $('tokenInput').value = '';
       sync.lastError = '';
       $('syncStatus').textContent = 'Token saved ✓ (encrypted on this device). Tap Test sync to check end to end.';
       if (st.data) renderSync(); else renderSyncState();
       scheduleSync(500);
     });
     $('removeTokenBtn').addEventListener('click', async () => {
-      if (!confirm('Remove the sync token from this device? (Also revoke it on GitHub if the device is lost.)')) return;
-      await removeToken(); $('syncStatus').textContent = 'Token removed. Changes stay on this device until you copy them or set a token again.';
+      if (!confirm('Turn off automatic sync on this device? The token is deleted here and will not be re-provisioned until you tap \u201cUse automatic sync\u201d.')) return;
+      await removeToken(); await setAutoOff(true);
+      $('syncStatus').textContent = 'Automatic sync turned off on this device. Changes stay here until you copy them or turn sync back on.';
+      if (st.data) renderSync(); else renderSyncState();
+    });
+    $('autoSyncBtn').addEventListener('click', async () => {
+      await setAutoOff(false);
+      if (sync.source === 'manual') await removeToken(); // back to the token delivered with the data
+      await provisionToken();
+      $('syncStatus').textContent = (await getToken()) ? 'Automatic sync on ✓' : 'Automatic sync on; it connects with the next data update.';
       if (st.data) renderSync(); else renderSyncState();
     });
     $('testSyncBtn').addEventListener('click', async () => {
@@ -829,6 +858,7 @@
     $('deviceName').value = (await HQDB.getMeta('deviceName').catch(() => null)) || '';
     st.lastSync = (await HQDB.getMeta('lastSync').catch(() => 0)) || 0;
     await loadSyncState();
+    await loadTokenMeta();
     st.device = await loadDevice();
     if (!st.device) {
       // First run: create this device's key pair automatically.

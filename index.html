@@ -48,18 +48,21 @@
         <h3>🔁 Sync back to your assistant</h3>
         <p class="muted small">Your taps (paid, charged, done, low…) are encrypted on this device to the assistant's box key and posted
           automatically to the private GitHub repo <b>rav-pawar/life-hq-inbox</b>. Only ciphertext leaves the device.</p>
-        <p class="small">Sync token: <b id="tokenState">not set</b></p>
+        <p class="small">Sync: <b id="tokenState">not connected yet</b></p>
         <div id="tokenForm" class="token-form">
           <input id="tokenInput" type="text" class="masked" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="GitHub sync token">
           <button id="saveTokenBtn" class="btn primary">Save token</button>
         </div>
         <div class="row-btns">
           <button id="testSyncBtn" class="btn">Test sync</button>
-          <button id="removeTokenBtn" class="btn ghost">Remove token</button>
+          <button id="removeTokenBtn" class="btn ghost">Turn off on this device</button>
+          <button id="autoSyncBtn" class="btn hidden">Use automatic sync</button>
         </div>
         <p id="syncStatus" class="muted small" role="status"></p>
         <details class="howto">
-          <summary>How to create the sync token (once per device) <span class="chev">›</span></summary>
+          <summary>Optional: use your own token instead <span class="chev">›</span></summary>
+          <p class="muted small">Normally nothing to do: the sync token arrives encrypted inside this device's data and connects automatically.
+            A token pasted here overrides it on this device.</p>
           <ol class="steps small">
             <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">github.com/settings/personal-access-tokens/new</a> (signed in as <b>rav-pawar</b>).</li>
             <li><b>Token name:</b> e.g. “Life HQ sync – this phone”. <b>Expiration:</b> 1 year (it can only touch the inbox; renew it here when it expires).</li>

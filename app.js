@@ -180,28 +180,156 @@
       const base = Date.parse(st.data.updatedAt || 0) || 0;
       for (const [k, v] of Object.entries(all)) {
         if (!v || (v.at || 0) > base) continue;
-        if (reflected(k, v, st.data)) { delete all[k]; await HQDB.delLocal(k).catch(() => {}); }
+        if (reflected(k, v, st.data)) { delete all[k]; await HQDB.delLocal(k).catch(() => {}); await markApplied(k); }
         else all[k] = Object.assign({}, v, { keep: true });
       }
     }
     st.overrides = all;
   }
-  async function setLocal(key, val) { await HQDB.setLocal(key, Object.assign({ at: Date.now() }, val)); await renderPreserving(); }
-  async function delLocal(key) { await HQDB.delLocal(key); await renderPreserving(); }
+  async function setLocal(key, val) { await HQDB.setLocal(key, Object.assign({ at: Date.now() }, val)); await renderPreserving(); scheduleSync(); }
+  async function delLocal(key) { await HQDB.delLocal(key); await forgetSent(key); await renderPreserving(); }
 
-  function pendingChanges() {
+  // [{ key, v, change }] for every pending tap (key = IndexedDB 'local' key, v.at = tap time).
+  function pendingEntries() {
     const base = Date.parse((st.data && st.data.updatedAt) || 0) || 0;
-    const changes = [];
+    const out = [];
     for (const [k, v] of Object.entries(st.overrides)) {
       if (!v || ((v.at || 0) <= base && !v.keep)) continue;
       const [kind, id] = [k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 1)];
       const at = new Date(v.at).toISOString();
-      if (kind === 'maint') changes.push({ type: 'maintenance.done', id, date: v.lastDone, at });
-      else if (kind === 'charge') changes.push({ type: 'charging.charged', id, date: v.date, at });
-      else if (kind === 'supply') changes.push(Object.assign({ type: 'supply.update', id, status: v.status, at }, v.lastBought ? { lastBought: v.lastBought } : {}));
-      else if (kind === 'card' || kind === 'bill') changes.push({ type: kind + '.status', id, status: v.status, date: v.date, at });
+      let change = null;
+      if (kind === 'maint') change = { type: 'maintenance.done', id, date: v.lastDone, at };
+      else if (kind === 'charge') change = { type: 'charging.charged', id, date: v.date, at };
+      else if (kind === 'supply') change = Object.assign({ type: 'supply.update', id, status: v.status, at }, v.lastBought ? { lastBought: v.lastBought } : {});
+      else if (kind === 'card' || kind === 'bill') change = { type: kind + '.status', id, status: v.status, date: v.date, at };
+      if (change) out.push({ key: k, v, change });
     }
-    return changes.sort((a, b) => a.at.localeCompare(b.at));
+    return out.sort((a, b) => a.change.at.localeCompare(b.change.at));
+  }
+  const pendingChanges = () => pendingEntries().map(e => e.change);
+
+  // ================= Sync back (device -> box) =================
+  // Pending taps are encrypted to the box key (config.js inboxPublicKey) and posted as an issue (ciphertext only) to
+  // the private inbox repo, using a per-device fine-grained token (Issues: read/write on that repo only). The box
+  // (tools/inbox.js) merges + republishes; the auto-refresh then sees them reflected and clears them ("applied").
+  // Per tap status: queued (not sent yet / changed since) -> sent -> applied (cleared). Copy/paste stays as fallback.
+  const INBOX_API = 'https://api.github.com/repos/' + (cfg.inboxRepo || 'rav-pawar/life-hq-inbox');
+  const sync = { timer: 0, busy: false, token: undefined, sent: {}, applied: { n: 0, at: 0 }, lastError: '', lastOk: 0, lastTry: 0, failures: 0 };
+  const syncReady = () => !!(cfg.inboxPublicKey && cfg.inboxPublicKey.x);
+  async function loadSyncState() {
+    sync.sent = (await HQDB.getMeta('syncSent').catch(() => null)) || {};
+    const a = await HQDB.getMeta('syncApplied').catch(() => null); if (a) sync.applied = a;
+  }
+  const saveSent = () => HQDB.setMeta('syncSent', sync.sent).catch(() => {});
+  async function markApplied(key) {
+    if (!sync.sent[key]) return;
+    delete sync.sent[key]; await saveSent();
+    sync.applied = { n: (Date.now() - sync.applied.at < 15 * 60000 ? sync.applied.n : 0) + 1, at: Date.now() };
+    HQDB.setMeta('syncApplied', sync.applied).catch(() => {});
+    sync.justApplied = (sync.justApplied || 0) + 1;
+  }
+  async function forgetSent(key) { if (sync.sent[key]) { delete sync.sent[key]; await saveSent(); } }
+
+  async function getToken() {
+    if (sync.token !== undefined) return sync.token;
+    try {
+      const key = await HQDB.getMeta('syncTokenKey'), sealed = await HQDB.getMeta('syncToken');
+      sync.token = key && sealed ? await LifeCrypto.unseal(key, sealed) : null;
+    } catch (e) { sync.token = null; }
+    return sync.token;
+  }
+  async function saveToken(t) {
+    let key = await HQDB.getMeta('syncTokenKey').catch(() => null);
+    if (!key) { key = await LifeCrypto.newSealKey(); await HQDB.setMeta('syncTokenKey', key); }
+    await HQDB.setMeta('syncToken', await LifeCrypto.seal(key, t));
+    sync.token = t;
+  }
+  async function removeToken() { await HQDB.delMeta('syncToken').catch(() => {}); await HQDB.delMeta('syncTokenKey').catch(() => {}); sync.token = null; }
+  function ghFetch(method, path, token, body) {
+    return fetch(INBOX_API + path, { method, cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer',
+      headers: Object.assign({ Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
+        body ? { 'Content-Type': 'application/json' } : {}),
+      body: body ? JSON.stringify(body) : undefined });
+  }
+  const httpMsg = s => s === 401 ? 'token rejected or expired (401): create a new one in Settings'
+    : s === 403 ? 'token lacks permission (403): it needs Issues: Read and write on rav-pawar/life-hq-inbox'
+    : s === 404 ? 'inbox repo not visible to this token (404): select rav-pawar/life-hq-inbox when creating it' : 'GitHub error ' + s;
+
+  async function renderSyncState() {
+    const token = await getToken();
+    const queued = pendingEntries().filter(e => !(sync.sent[e.key] && sync.sent[e.key].at === e.v.at)).length;
+    let t;
+    if (!syncReady()) t = 'Automatic sync is not configured in this build; use Copy changes.';
+    else if (!token) t = 'Automatic sync is off: set a sync token in ⚙️ Settings, or use Copy changes.';
+    else if (sync.lastError) t = '⚠️ Sync failed: ' + sync.lastError + (queued ? ' · will retry' : '');
+    else if (queued) t = navigator.onLine ? `Sending ${queued} change${queued === 1 ? '' : 's'} shortly…` : `Offline: ${queued} queued, will send when back online`;
+    else t = sync.lastOk ? 'Automatic sync on · last sent ' + hm(sync.lastOk) + ' IST' : 'Automatic sync on';
+    $('syncState').textContent = t;
+    $('tokenState').textContent = token ? 'set ✓' : 'not set';
+    $('tokenForm').classList.toggle('hidden', !!token);
+    $('removeTokenBtn').classList.toggle('hidden', !token);
+    $('testSyncBtn').disabled = !token || !syncReady();
+  }
+  function scheduleSync(delay) {
+    clearTimeout(sync.timer);
+    sync.timer = setTimeout(() => syncNow().catch(e => console.error('sync failed', e)), delay == null ? 5000 : delay); // debounce taps
+  }
+  // Sends the queued taps (or an empty test payload). Returns the issue number, or 0.
+  async function syncNow(opts) {
+    opts = opts || {};
+    if (sync.busy || !st.device || !syncReady()) return 0;
+    const token = await getToken();
+    if (!token || (!st.data && !opts.test)) return 0;
+    const entries = opts.test ? [] : pendingEntries().filter(e => !(sync.sent[e.key] && sync.sent[e.key].at === e.v.at));
+    if (!opts.test && !entries.length) return 0;
+    if (!navigator.onLine) { renderSyncState(); return 0; }
+    sync.busy = true; sync.lastTry = Date.now();
+    try {
+      const payload = { lifeHqChanges: 1, exportedAt: new Date().toISOString(), baseUpdatedAt: (st.data && st.data.updatedAt) || null, changes: entries.map(e => e.change) };
+      if (opts.test) payload.test = true;
+      const env = await LifeCrypto.encryptForBox(payload, cfg.inboxPublicKey, st.device);
+      const res = await ghFetch('POST', '/issues', token, { title: `lhq-changes ${st.device.kid} ${payload.exportedAt}`, body: JSON.stringify(env) });
+      if (res.status !== 201) { sync.lastError = httpMsg(res.status); sync.failures++; return 0; }
+      const issue = (await res.json().catch(() => ({}))).number || 0;
+      for (const e of entries) sync.sent[e.key] = { at: e.v.at, sentAt: Date.now(), issue };
+      if (entries.length) await saveSent();
+      sync.lastError = ''; sync.failures = 0; sync.lastOk = Date.now();
+      return issue || -1;
+    } catch (e) {
+      sync.lastError = navigator.onLine ? 'network error (' + e.message + ')' : 'offline'; sync.failures++;
+      return 0;
+    } finally {
+      sync.busy = false;
+      if (st.data) renderSync(); else renderSyncState();
+      if (sync.lastError && !opts.test) scheduleSync(Math.min(10 * 60000, 30000 * 2 ** Math.min(sync.failures, 5))); // backoff retry
+    }
+  }
+  function wireSync() {
+    $('saveTokenBtn').addEventListener('click', async () => {
+      const t = $('tokenInput').value.trim();
+      if (!/^(github_pat_|ghp_|gho_)[A-Za-z0-9_]{20,}$/.test(t)) { $('syncStatus').textContent = 'That does not look like a GitHub token (it starts with github_pat_).'; return; }
+      $('syncStatus').textContent = 'Checking the token…';
+      let ok = false;
+      try { const r = await ghFetch('GET', '', t); ok = r.ok; if (!ok) $('syncStatus').textContent = '⚠️ ' + httpMsg(r.status) + '. Not saved.'; }
+      catch (e) { $('syncStatus').textContent = '⚠️ Could not reach GitHub (' + e.message + '). Not saved.'; }
+      if (!ok) return;
+      await saveToken(t); $('tokenInput').value = '';
+      sync.lastError = '';
+      $('syncStatus').textContent = 'Token saved ✓ (encrypted on this device). Tap Test sync to check end to end.';
+      if (st.data) renderSync(); else renderSyncState();
+      scheduleSync(500);
+    });
+    $('removeTokenBtn').addEventListener('click', async () => {
+      if (!confirm('Remove the sync token from this device? (Also revoke it on GitHub if the device is lost.)')) return;
+      await removeToken(); $('syncStatus').textContent = 'Token removed. Changes stay on this device until you copy them or set a token again.';
+      if (st.data) renderSync(); else renderSyncState();
+    });
+    $('testSyncBtn').addEventListener('click', async () => {
+      $('syncStatus').textContent = 'Sending an encrypted test…';
+      const n = await syncNow({ test: true });
+      $('syncStatus').textContent = n ? `✓ Test sync sent${n > 0 ? ' (issue #' + n + ')' : ''}. Your assistant's box will mark it applied on its next inbox run.` : '⚠️ Test sync failed: ' + (sync.lastError || 'not ready');
+    });
+    addEventListener('online', () => scheduleSync(1000));
   }
 
   // ================= Auto-refresh =================
@@ -264,7 +392,9 @@
     }
     if (!prev) { await openDashboard(); if (reason !== 'load') toast('Updated just now'); return true; }
     await renderPreserving();
-    if (prev.updatedAt !== st.data.updatedAt || envFp(prevEnv) !== envFp(env)) toast('Updated just now');
+    const nApplied = sync.justApplied || 0; sync.justApplied = 0;
+    if (nApplied) toast(`Updated · ${nApplied} change${nApplied === 1 ? '' : 's'} applied`);
+    else if (prev.updatedAt !== st.data.updatedAt || envFp(prevEnv) !== envFp(env)) toast('Updated just now');
     document.body.dataset.refreshed = String(Date.now()); // marker for the headless test
     return true;
   }
@@ -394,8 +524,26 @@
     $('suppliesList').replaceChildren(...(out.length ? out : [el('p', 'empty', 'No supplies tracked.')]));
   }
 
+  function changeLabel(c) {
+    const d = st.data || {}, find = list => (list || []).find(x => x && x.id === c.id) || {};
+    if (c.type === 'maintenance.done') { const t = find(((d.maintenance || {}).appliances || []).flatMap(a => a.tasks || [])); return `Done: ${t.name || c.id}`; }
+    if (c.type === 'charging.charged') return `Charged: ${find((d.charging || {}).devices).name || c.id}`;
+    if (c.type === 'supply.update') return `${c.lastBought ? 'Bought' : c.status === 'out' ? 'Out' : c.status === 'low' ? 'Low' : 'OK'}: ${find((d.supplies || {}).items).name || c.id}`;
+    const m = find((d.money || {})[c.type === 'card.status' ? 'cards' : 'bills']);
+    return `${c.status === 'paid' ? 'Paid' : 'Unpaid'}: ${m.label || m.pushLabel || c.id}`;
+  }
   function renderSync() {
-    const changes = pendingChanges();
+    const entries = pendingEntries(), changes = entries.map(e => e.change);
+    $('syncList').replaceChildren(...entries.map(e => {
+      const s = sync.sent[e.key], sent = s && s.at === e.v.at;
+      const li = el('li'); li.append(el('span', '', changeLabel(e.change)), pill(sent ? 'sent' : 'queued', sent ? 'blue' : 'amber'));
+      if (sent) li.title = 'Sent ' + fmtIST(s.sentAt) + (s.issue ? ' (#' + s.issue + ')' : '') + '; waiting for your assistant to apply it';
+      return li;
+    }));
+    const ap = sync.applied;
+    $('syncApplied').classList.toggle('hidden', !(ap.n && Date.now() - ap.at < 15 * 60000));
+    $('syncApplied').textContent = ap.n ? `✓ ${ap.n} change${ap.n === 1 ? '' : 's'} applied ${hm(ap.at)} IST` : '';
+    renderSyncState();
     $('syncCount').textContent = String(changes.length);
     $('syncJson').value = changes.length
       ? JSON.stringify({ lifeHqChanges: 1, exportedAt: new Date().toISOString(), baseUpdatedAt: st.data.updatedAt || null, changes })
@@ -625,6 +773,7 @@
 
   function wire() {
     wireNav();
+    wireSync();
     $('lockBtn').addEventListener('click', forgetDevice);
     $('forgetBtn').addEventListener('click', forgetDevice);
     $('newKeyBtn').addEventListener('click', newKey);
@@ -667,7 +816,7 @@
     addEventListener('focus', () => onVisible('focus'));
     addEventListener('pageshow', ev => { if (ev.persisted) onVisible('pageshow'); });
     addEventListener('online', () => onVisible('online'));
-    setInterval(() => { if (!document.hidden) refreshData('poll'); }, 60000);
+    setInterval(() => { if (!document.hidden) refreshData('poll'); if (sync.lastError && Date.now() - sync.lastTry > 60000) scheduleSync(0); }, 60000);
   }
 
   async function init() {
@@ -679,6 +828,7 @@
     await HQDB.delMeta('rememberedKey').catch(() => {}); // v1 leftover (password-derived key), no longer used
     $('deviceName').value = (await HQDB.getMeta('deviceName').catch(() => null)) || '';
     st.lastSync = (await HQDB.getMeta('lastSync').catch(() => 0)) || 0;
+    await loadSyncState();
     st.device = await loadDevice();
     if (!st.device) {
       // First run: create this device's key pair automatically.
@@ -686,6 +836,8 @@
     }
     await unlockFlow();
     st.lastCheck = Date.now();
+    renderSyncState().catch(() => {});
+    scheduleSync(3000); // anything queued from last time (e.g. tapped while offline)
   }
 
   init();

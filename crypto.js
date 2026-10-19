@@ -74,5 +74,38 @@
     }
   }
 
-  g.LifeCrypto = { ALG, createDeviceKey, kidFromJwk, decryptForDevice };
+  // Sync-back (device -> box): encrypt a JSON object to the box public key (config.js inboxPublicKey).
+  //   Z1 = ECDH(ephemeral, box), Z2 = ECDH(this device's private key, box)  (Z2 lets the box verify the enrolled sender)
+  //   K = HKDF-SHA256(Z1 || Z2, salt, 'life-hq v2 inbox' || box kid);  ct = AES-256-GCM(K, iv, JSON, AAD 'lhq-inbox|boxKid|deviceKid')
+  // Same as tools/v2-crypto.js encryptInbox / decryptInbox. Output is ciphertext only.
+  const INBOX_ALG = 'ECDH-ES+S-P256+HKDF-SHA256+A256GCM';
+  const INBOX_INFO = 'life-hq v2 inbox';
+  async function encryptForBox(obj, boxJwk, dev) {
+    const P256 = { name: 'ECDH', namedCurve: 'P-256' };
+    const boxKid = await kidFromJwk(boxJwk);
+    const boxPub = await subtle().importKey('jwk', { kty: 'EC', crv: 'P-256', x: boxJwk.x, y: boxJwk.y }, P256, false, []);
+    const eph = await subtle().generateKey(P256, false, ['deriveBits']);
+    const z1 = new Uint8Array(await subtle().deriveBits({ name: 'ECDH', public: boxPub }, eph.privateKey, 256));
+    const z2 = new Uint8Array(await subtle().deriveBits({ name: 'ECDH', public: boxPub }, dev.privateKey, 256));
+    const salt = g.crypto.getRandomValues(new Uint8Array(16)), iv = g.crypto.getRandomValues(new Uint8Array(12));
+    const ikm = await subtle().importKey('raw', concat(z1, z2), 'HKDF', false, ['deriveKey']);
+    const key = await subtle().deriveKey({ name: 'HKDF', hash: 'SHA-256', salt, info: concat(te.encode(INBOX_INFO), te.encode(boxKid)) },
+      ikm, { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
+    const ct = await subtle().encrypt({ name: 'AES-GCM', iv, additionalData: te.encode('lhq-inbox|' + boxKid + '|' + dev.kid), tagLength: 128 },
+      key, te.encode(JSON.stringify(obj)));
+    const b64 = b => btoa(String.fromCharCode(...new Uint8Array(b)));
+    return { v: 2, t: 'lhq-inbox', alg: INBOX_ALG, kid: boxKid, from: dev.kid, epk: b64(await subtle().exportKey('raw', eph.publicKey)),
+      salt: b64(salt), iv: b64(iv), ct: b64(ct) };
+  }
+
+  // Device-local secret sealing (the sync token): AES-256-GCM with a NON-extractable key kept in IndexedDB.
+  // Best effort: it keeps the token out of plaintext storage; code running in this origin can still use the key.
+  async function newSealKey() { return subtle().generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']); }
+  async function seal(key, text) {
+    const iv = g.crypto.getRandomValues(new Uint8Array(12));
+    return { iv, ct: new Uint8Array(await subtle().encrypt({ name: 'AES-GCM', iv }, key, te.encode(text))) };
+  }
+  async function unseal(key, box) { return new TextDecoder().decode(await subtle().decrypt({ name: 'AES-GCM', iv: box.iv }, key, box.ct)); }
+
+  g.LifeCrypto = { ALG, createDeviceKey, kidFromJwk, decryptForDevice, encryptForBox, newSealKey, seal, unseal };
 })(self);

@@ -15,3 +15,5 @@ node_modules/
 devices*.json
 kdf.json
 notify-state.json
+# sync-back box private key
+box-key*

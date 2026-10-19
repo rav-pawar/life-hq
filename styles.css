@@ -134,3 +134,20 @@ main > *, #dash > * { min-width: 0; max-width: 100%; }
 .toast.warn { background: var(--amber-bg); color: #ffd27a; border-color: var(--amber-border); }
 .sync-info:empty { display: none; }
 @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+
+/* ---- Sync back ---- */
+.sync-setup { margin-top: 14px; padding-top: 12px; border-top: 1px solid #262a38; }
+.sync-setup h3 { font-size: 1rem; margin: 0 0 6px; }
+.token-form { display: flex; gap: 8px; margin: 6px 0 10px; }
+.token-form input { flex: 1; min-width: 0; padding: 10px; border-radius: 10px; border: 1px solid #343a4f; background: #0c0e14; color: var(--text);
+  font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; -webkit-text-security: disc; }
+.howto { margin-top: 8px; }
+.howto summary { color: #8fb6ff; font-size: .9rem; }
+.howto a { color: #8fb6ff; word-break: break-all; }
+.howto code { font-size: .85em; }
+.sync-list { list-style: none; padding: 0; margin: 8px 0; display: flex; flex-direction: column; gap: 6px; }
+.sync-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: var(--card2); border-radius: 10px;
+  padding: 8px 10px; font-size: .9rem; }
+.sync-list li span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.pill.blue { background: #16284a; color: #9cc0ff; }
+.applied { color: #7ee2a8; margin: 4px 0; }

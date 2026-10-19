@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; manifest-src 'self'; worker-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; manifest-src 'self'; worker-src 'self'">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#11131a">
   <meta name="description" content="Life HQ: personal dashboard and important alerts">
@@ -43,6 +43,34 @@
       </div>
       <p id="status" class="muted small"></p>
       <p id="syncInfoSettings" class="muted small sync-info"></p>
+
+      <div id="syncSetup" class="sync-setup">
+        <h3>🔁 Sync back to your assistant</h3>
+        <p class="muted small">Your taps (paid, charged, done, low…) are encrypted on this device to the assistant's box key and posted
+          automatically to the private GitHub repo <b>rav-pawar/life-hq-inbox</b>. Only ciphertext leaves the device.</p>
+        <p class="small">Sync token: <b id="tokenState">not set</b></p>
+        <div id="tokenForm" class="token-form">
+          <input id="tokenInput" type="text" class="masked" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="GitHub sync token">
+          <button id="saveTokenBtn" class="btn primary">Save token</button>
+        </div>
+        <div class="row-btns">
+          <button id="testSyncBtn" class="btn">Test sync</button>
+          <button id="removeTokenBtn" class="btn ghost">Remove token</button>
+        </div>
+        <p id="syncStatus" class="muted small" role="status"></p>
+        <details class="howto">
+          <summary>How to create the sync token (once per device) <span class="chev">›</span></summary>
+          <ol class="steps small">
+            <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">github.com/settings/personal-access-tokens/new</a> (signed in as <b>rav-pawar</b>).</li>
+            <li><b>Token name:</b> e.g. “Life HQ sync – this phone”. <b>Expiration:</b> 1 year (it can only touch the inbox; renew it here when it expires).</li>
+            <li><b>Resource owner:</b> rav-pawar.</li>
+            <li><b>Repository access:</b> Only select repositories → <b>rav-pawar/life-hq-inbox</b>.</li>
+            <li><b>Permissions → Repository permissions → Issues: Read and write.</b> Leave everything else at No access (Metadata: Read-only is added automatically).</li>
+            <li><b>Generate token</b>, copy it (starts with <code>github_pat_</code>), paste it above, tap <b>Save token</b>, then <b>Test sync</b>.</li>
+          </ol>
+          <p class="muted small">The token is stored on this device encrypted with a non-extractable key (best effort). Remove it here if the device is lost, and revoke it on GitHub.</p>
+        </details>
+      </div>
     </section>
 
     <!-- Subscription display -->
@@ -137,7 +165,10 @@
 
       <section id="s-sync" class="card sec">
         <h2>🔄 Changes to sync <span id="syncCount" class="pill">0</span></h2>
-        <p class="muted small">Taps (done, charged, low, paid…) stay on this device. Copy this and paste it to your assistant so they can be saved into your data.</p>
+        <p id="syncLead" class="muted small">Taps (done, charged, low, paid…) are sent to your assistant automatically once a sync token is set (⚙️ Settings). Fallback: copy this and paste it to your assistant.</p>
+        <ul id="syncList" class="sync-list"></ul>
+        <p id="syncApplied" class="small applied hidden"></p>
+        <p id="syncState" class="muted small"></p>
         <textarea id="syncJson" readonly rows="6" spellcheck="false"></textarea>
         <button id="copySyncBtn" class="btn primary">📋 Copy changes</button>
         <p id="dataInfo" class="muted small"></p>

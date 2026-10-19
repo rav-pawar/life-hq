@@ -172,6 +172,11 @@
     const info = festivalDayInfo(fest, today);
     if (!info) return [];
     const out = [];
+    // Day-specific observables first (days[].observe), then festival trivia.
+    const named = (fest.days || []).find(d => d && d.date === today);
+    (named && Array.isArray(named.observe) ? named.observe : []).forEach((text, i) => {
+      if (typeof text === 'string' && text.trim()) out.push({ id: `${fest.id || 'fest'}-${today}-obs${i}`, text, when: 'day', eveningHint: false });
+    });
     for (const t of (fest.trivia || [])) {
       if (!t || !t.text) continue;
       const when = t.when || 'always';

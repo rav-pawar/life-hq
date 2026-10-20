@@ -216,7 +216,8 @@
   function noticeItems(data, overrides, today) {
     return ((((data || {}).notices) || {}).items || []).filter(n => n && n.id && n.title).map(n => {
       const o = freshOverride(data, overrides, 'notice:' + n.id);
-      const status = o && o.status ? o.status : (n.status === 'done' ? 'done' : 'open');
+      // 'dismissed' (closed by the morning routine, e.g. superseded) is shown like done and never pushed.
+      const status = o && o.status ? o.status : (n.status === 'done' || n.status === 'dismissed' ? 'done' : 'open');
       const daysLeft = isYMD(n.dueDate) ? daysBetween(today, n.dueDate) : null;
       const sev = ['urgent', 'warn', 'info'].includes(n.sev) ? n.sev : 'info';
       return Object.assign({}, n, { status, sev, daysLeft, doneLocally: !!(o && o.status === 'done'),
@@ -258,7 +259,14 @@
     for (const [k, v] of Object.entries(overrides || {})) {
       if (!k.startsWith('note:') || !v) continue;
       const id = k.slice(5);
-      if (v.op === 'add' && !out.has(id) && !((((data || {}).notes) || {}).deleted || []).includes(id)) out.set(id, { id, text: v.text, createdAt: v.createdAt, pending: true });
+      const gone = ((((data || {}).notes) || {}).deleted || []).includes(id);
+      if (v.op === 'add' && !out.has(id) && !gone) out.set(id, { id, text: v.text, createdAt: v.createdAt, pending: true });
+      else if (v.op === 'edit' && !gone && typeof v.text === 'string') {
+        const cur = out.get(id);
+        // An edit of a note whose add is still on its way keeps createdAt so it stays visible until both land.
+        if (cur) out.set(id, Object.assign({}, cur, { text: v.text, pending: cur.text !== v.text || cur.pending }));
+        else if (v.createdAt) out.set(id, { id, text: v.text, createdAt: v.createdAt, pending: true });
+      }
       else if (v.op === 'delete') out.delete(id);
     }
     return [...out.values()].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
@@ -351,7 +359,7 @@
     if (noSchool && noSchool.kind === 'holiday' && schoolDays(data).includes(weekdayOf(today)) && ((data.school || {}).runs || []).length) {
       // The festival line below already names the day: don't repeat its label here.
       const isFestLabel = activeFestivals(data, today).some(i => i.label === noSchool.name);
-      out.push({ sev: 'info', section: 'family', text: isFestLabel ? '🥳 No school today (festival holiday)' : `🥳 No school today: ${noSchool.name}` });
+      out.push({ sev: 'info', section: 'family', pin: true, text: isFestLabel ? '🥳 No school today (festival holiday)' : `🥳 No school today: ${noSchool.name}` });
     }
     if (schoolDay(data, today)) {
       for (const r of ((data.school || {}).runs || [])) {
@@ -383,9 +391,9 @@
       out.push({ sev, section: 'money', text: `${sev === 'urgent' ? '' : (n.icon || '📬') + ' '}${n.title}${when}` }); // urgent rows get 🚨 only
     }
     for (const info of activeFestivals(data, today)) {
-      const trivia = festivalTriviaToday(info.fest, today);
-      const tip = trivia.length ? ' · ' + dedupeLead(info.label, trivia[0].text) : '';
-      out.push({ sev: 'info', section: 'festivals', text: `${info.fest.emoji || '🎉'} ${info.fest.name}: ${info.label}${tip}` });
+      // All of today's lines go in `lines` (the app shows them collapsed under a one-line teaser).
+      const lines = festivalTriviaToday(info.fest, today).map(t => dedupeLead(info.label, t.text)).filter(Boolean);
+      out.push({ sev: 'info', section: 'festivals', text: `${info.fest.emoji || '🎉'} ${info.fest.name}: ${info.label}`, festId: info.fest.id || null, lines });
     }
     const rank = { urgent: 0, warn: 1, info: 2, past: 3 };
     return out.sort((a, b) => rank[a.sev] - rank[b.sev]);
@@ -425,7 +433,30 @@
         body: `${wk.tasks.length} home task${wk.tasks.length === 1 ? '' : 's'} due in the next ${s.mw.lookaheadDays} days.`,
         items: wk.tasks.map(t => `${t.appliance}: ${t.name}`) });
     }
+    // Notices from email: one push on the day they fall due (dueDate, or date when there is no dueDate).
+    if (nowMin >= hhmmToMin(s.dailyAlertTime)) {
+      for (const n of noticeItems(data, {}, today)) {
+        if (n.status !== 'open') continue; // done or dismissed
+        const day = isYMD(n.dueDate) ? n.dueDate : (isYMD(n.date) ? n.date : null);
+        if (day !== today) continue;
+        alerts.push({ key: 'notice:' + n.id, group: 'notices', type: n.sev === 'urgent' ? 'urgent' : 'info', title: noticePushTitle(n), body: 'Open Life HQ for details.' });
+      }
+    }
     return { today, nowMin, alerts };
+  }
+
+  // Lock-screen-safe push title for a notice. notice.pushTitle (generic text set by the morning routine) wins if it
+  // passes the sensitive-text check and has no email address; otherwise a generic line by kind.
+  function noticePushTitle(n) {
+    const own = typeof n.pushTitle === 'string' ? n.pushTitle.trim() : '';
+    if (own && own.length <= 60 && !sensitiveReason(own) && !/@/.test(own)) return own;
+    const k = String(n.kind || '') + ' ' + String(n.pill || '');
+    if (/return|pick/i.test(k)) return '📦 Return pickup today';
+    if (/refund/i.test(k)) return '💸 Refund due today';
+    if (/pay|bill|card/i.test(k)) return '💳 Payment due today';
+    if (/tag|toll|top/i.test(k)) return '🚗 Toll tag: top up today';
+    if (/deliver|order|ship/i.test(k)) return '📦 Delivery today';
+    return '📬 Reminder for today';
   }
 
   // Refuses text that looks like money amounts or account / card numbers.
@@ -441,6 +472,6 @@
     settingsOf, nextMaintenanceSaturday, isMaintenanceSaturday, maintenanceTasks, maintenanceWeekend, maintenanceOverview, applianceIcon, moneyItems,
     noticeItems, calendarEvents, todoItems, noteItems, cleanNoteText, NOTE_MAX, NOTE_ID_RE, dedupeLead, schoolDay, holidayEntry, holidayDates, noSchoolReason, nextSchoolDay,
     chargingDevices, supplyItems, festivalDayInfo, festivalTriviaToday, activeFestivals, upcomingFestivals,
-    todayItems, dueAlerts, sensitiveReason };
+    todayItems, dueAlerts, noticePushTitle, sensitiveReason };
   if (typeof module === 'object' && module.exports) module.exports = g.LifeLogic;
 })(typeof self !== 'undefined' ? self : globalThis);

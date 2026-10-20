@@ -7,7 +7,7 @@
   const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   let reg = null;
   // Version of this page's code; must equal CACHE in sw.js (bump both together). A different live sw.js = new code.
-  const APP_VERSION = 'life-hq-v13';
+  const APP_VERSION = 'life-hq-v14';
 
   // In-memory only. Plaintext data is never written to storage.
   const st = { env: null, device: null, data: null, overrides: {}, flashId: null, noData: false, lastSync: 0, offline: false, lastCheck: 0 };
@@ -91,6 +91,7 @@
   }
 
   function showLock(msg) {
+    flushNoteDeletes(); noteEdit = null; // a delete waiting on its Undo toast is still queued
     st.data = null;
     $('dash').classList.add('hidden');
     $('tabs').classList.add('hidden');
@@ -180,6 +181,7 @@
     if (kind === 'note') {
       // Applied = the box has the note (add) or a tombstone for it (add or delete): a delete is never cleared before it lands.
       const notes = d.notes || {}, gone = (notes.deleted || []).includes(id);
+      if (v.op === 'edit') { const n = find(notes.items); return gone || (!!n && n.text === v.text); }
       return v.op === 'delete' ? gone : (gone || !!find(notes.items));
     }
     return true; // unknown kind: nothing to sync
@@ -213,7 +215,7 @@
       else if (kind === 'supply') change = Object.assign({ type: 'supply.update', id, status: v.status, at }, v.lastBought ? { lastBought: v.lastBought } : {});
       else if (kind === 'card' || kind === 'bill') change = { type: kind + '.status', id, status: v.status, date: v.date, at };
       else if (kind === 'notice') change = { type: 'notice.status', id, status: v.status, date: v.date, at };
-      else if (kind === 'note') change = v.op === 'delete' ? { type: 'note.delete', id, at } : { type: 'note.add', id, text: v.text, createdAt: v.createdAt, at };
+      else if (kind === 'note') change = v.op === 'delete' ? { type: 'note.delete', id, at } : v.op === 'edit' ? { type: 'note.edit', id, text: v.text, at } : { type: 'note.add', id, text: v.text, createdAt: v.createdAt, at };
       if (change) out.push({ key: k, v, change });
     }
     return out.sort((a, b) => a.change.at.localeCompare(b.change.at));
@@ -520,6 +522,7 @@
       (a.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|reset|range|color|file|image)$/i.test(a.type)))) return 'typing';
     if (!$('settings').classList.contains('hidden')) return 'settings';
     if (upd.dialogs) return 'dialog';
+    if (noteUndo.size) return 'undo';
     if (nav.lockId) return 'scrolling';
     return '';
   }
@@ -637,13 +640,44 @@
     $('todayDate').textContent = L.fmtDate(today) + ' · ' + L.fmtTime(`${Math.floor(L.istMinutes(now) / 60)}:${String(L.istMinutes(now) % 60).padStart(2, '0')}`) + ' IST';
     const items = L.todayItems(st.data, st.overrides, now);
     const list = items.map(i => {
+      if (i.section === 'festivals' && i.lines && i.lines.length) return festivalTip(i, today);
       const c = row(sevCls[i.sev], (i.sev === 'urgent' ? '🚨 ' : '') + i.text);
       c.classList.add('compact'); c.addEventListener('click', () => $('s-' + i.section).scrollIntoView({ behavior: 'smooth' }));
       return c;
     });
+    // Long day: urgent, warning and pinned rows (no school) plus the collapsed festival tip always show; other info rows
+    // fill up to TODAY_SHOW and the rest fold under "N more today" (only when that hides 2 or more).
+    const pinned = i => i.sev === 'urgent' || i.sev === 'warn' || i.pin || i.section === 'festivals';
+    let room = Math.max(0, TODAY_SHOW - items.filter(pinned).length);
+    const foldIdx = items.map((i, k) => (pinned(i) || room-- > 0) ? -1 : k).filter(k => k >= 0);
+    if (foldIdx.length >= 2) {
+      const rest = foldIdx.map(k => list[k]);
+      for (const k of foldIdx.reverse()) list.splice(k, 1);
+      const det = remember(el('details', 'more-rows'), 'today-more');
+      const s = el('summary', null); s.append(el('span', null, `${rest.length} more today`), el('span', 'chev', '›'));
+      const inner = el('div', 'list'); inner.append(...rest);
+      det.append(s, inner);
+      list.push(det);
+    }
     $('todayList').replaceChildren(...(list.length ? list : [el('p', 'empty', 'Nothing due today. 🎉')]));
     renderCalendar(now, today);
     renderTodos(today);
+  }
+
+  const TODAY_SHOW = 5, TODO_SHOW = 5;
+  // Festival tip in Today: title + one-line teaser, all of today's lines on tap (open state kept for the session).
+  function festivalTip(i, today) {
+    const det = remember(el('details', 'item compact fest-tip'), 'fest-tip:' + (i.festId || 'f') + ':' + today);
+    const s = el('summary');
+    const left = el('div', 'grow');
+    left.append(el('p', 'title', i.text), el('p', 'sub teaser', i.lines[0]));
+    s.append(left, el('span', 'tip-count muted small', i.lines.length > 1 ? `${i.lines.length} tips` : 'tip'), el('span', 'chev', '›'));
+    const ul = el('ul', 'fest-lines');
+    for (const t of i.lines) ul.appendChild(el('li', null, t));
+    const go = el('button', 'btn small ghost', 'Festivals ›'); go.type = 'button';
+    go.addEventListener('click', () => $('s-festivals').scrollIntoView({ behavior: 'smooth' }));
+    det.append(s, ul, go);
+    return det;
   }
 
   // Calendar: today + next 2 days. More than 3 events: collapsed under a one-line summary.
@@ -690,40 +724,111 @@
     const c = el('div', 'card-lite todo');
     c.appendChild(el('p', 'block-title', `✅ To-do · ${items.length} open`));
     const ul = el('ul', 'todo-list');
-    for (const t of items.slice(0, 20)) {
-      const li = el('li');
-      li.appendChild(el('span', 'todo-title', t.title));
-      if (t.due) li.appendChild(pill(t.overdue ? 'overdue' : t.daysLeft === 0 ? 'today' : t.daysLeft === 1 ? 'tomorrow' : L.fmtDate(t.due), t.overdue ? 'red' : t.daysLeft <= 1 ? 'amber' : 'blue'));
-      const a = extLink('Open ↗', t.link); if (a) li.appendChild(a);
-      ul.appendChild(li);
-    }
+    const li = t => {
+      const x = el('li');
+      x.appendChild(el('span', 'todo-title', t.title));
+      if (t.due) x.appendChild(pill(t.overdue ? 'overdue' : t.daysLeft === 0 ? 'today' : t.daysLeft === 1 ? 'tomorrow' : L.fmtDate(t.due), t.overdue ? 'red' : t.daysLeft <= 1 ? 'amber' : 'blue'));
+      const a = extLink('Open ↗', t.link); if (a) x.appendChild(a);
+      return x;
+    };
+    const shown = items.length > TODO_SHOW + 1 ? TODO_SHOW : items.length;
+    for (const t of items.slice(0, shown)) ul.appendChild(li(t));
     c.appendChild(ul);
-    if (items.length > 20) c.appendChild(el('p', 'muted small', `…and ${items.length - 20} more`));
+    if (items.length > shown) {
+      const det = remember(el('details', 'more-rows'), 'todo-more');
+      const s = el('summary'); s.append(el('span', null, `${items.length - shown} more`), el('span', 'chev', '›'));
+      const ul2 = el('ul', 'todo-list');
+      for (const t of items.slice(shown, 50)) ul2.appendChild(li(t));
+      det.append(s, ul2);
+      if (items.length > 50) det.appendChild(el('p', 'muted small', `…and ${items.length - 50} more`));
+      c.appendChild(det);
+    }
     box.replaceChildren(c);
   }
 
   // Notes to self: queued locally as note:<id> taps, synced through the inbox, published encrypted to every device.
+  // Edit is inline (note.edit); delete hides the note at once and only queues note.delete after the ~6 s Undo toast.
+  const noteUndo = new Map(); // id -> { note, timer }
+  let noteEdit = null;        // { id, text, focus, sel }: the open inline editor, kept across re-renders
+  const UNDO_MS = 6000;
   function renderNotes() {
-    const notes = L.noteItems(st.data, st.overrides);
+    const notes = L.noteItems(st.data, st.overrides).filter(n => !noteUndo.has(n.id));
     $('noteCount').textContent = String(notes.length);
+    if (noteEdit && !notes.some(n => n.id === noteEdit.id)) noteEdit = null;
     const out = notes.map(n => {
       const c = el('div', 'item note-item');
-      const top = el('div', 'row');
-      const left = el('div', 'grow');
-      left.appendChild(el('p', 'note-text', n.text));
+      c.dataset.id = n.id;
       const when = n.createdAt && Date.parse(n.createdAt) ? fmtIST(Date.parse(n.createdAt)) : '';
       const m = el('p', 'sub', when);
       if (n.pending) { m.appendChild(document.createTextNode(when ? ' · ' : '')); m.appendChild(pill(sync.sent['note:' + n.id] ? 'sent' : 'queued', sync.sent['note:' + n.id] ? 'blue' : 'amber')); }
+      if (noteEdit && noteEdit.id === n.id) { c.classList.add('editing'); c.append(noteEditor(n), m); return c; }
+      const top = el('div', 'row');
+      const left = el('div', 'grow');
+      left.appendChild(el('p', 'note-text', n.text));
       left.appendChild(m);
       top.appendChild(left);
+      const edit = btn('Edit', 'ghost', () => { noteEdit = { id: n.id, text: n.text, focus: true }; renderNotes(); });
+      edit.setAttribute('aria-label', 'Edit note: ' + n.text.slice(0, 40));
       const del = btn('Delete', 'ghost', () => deleteNote(n));
       del.setAttribute('aria-label', 'Delete note: ' + n.text.slice(0, 40));
-      const r = el('div', 'right'); r.appendChild(del); top.appendChild(r);
+      const r = el('div', 'right note-btns'); r.append(edit, del); top.appendChild(r);
       c.appendChild(top);
       return c;
     });
     $('notesList').replaceChildren(...(out.length ? out : [el('p', 'empty', 'No notes yet.')]));
+    const ta = document.querySelector('#notesList textarea');
+    if (ta && noteEdit && noteEdit.focus) {
+      ta.focus();
+      const [a, b] = noteEdit.sel || [ta.value.length, ta.value.length];
+      try { ta.setSelectionRange(a, b); } catch (e) { /* ignore */ }
+    }
     updateNoteCounter();
+  }
+  function noteEditor(n) {
+    const box = el('div', 'note-edit');
+    const ta = el('textarea', 'note-edit-input');
+    ta.value = noteEdit.text; ta.rows = Math.min(8, Math.max(2, noteEdit.text.split('\n').length + 1));
+    ta.maxLength = L.NOTE_MAX * 2; ta.setAttribute('aria-label', 'Edit note');
+    const count = el('span', 'note-counter muted small');
+    const save = el('button', 'btn small primary', 'Save'), cancel = el('button', 'btn small ghost', 'Cancel');
+    save.type = cancel.type = 'button';
+    const upd8 = () => {
+      const v = ta.value, clean = L.cleanNoteText(v);
+      count.textContent = `${v.length}/${L.NOTE_MAX}`;
+      count.classList.toggle('red-text', v.length > L.NOTE_MAX);
+      save.disabled = !clean || v.length > L.NOTE_MAX || clean === n.text;
+    };
+    const track = () => { noteEdit.text = ta.value; noteEdit.sel = [ta.selectionStart, ta.selectionEnd]; };
+    ta.addEventListener('input', () => { track(); upd8(); });
+    ta.addEventListener('select', track); ta.addEventListener('keyup', track); ta.addEventListener('click', track);
+    ta.addEventListener('focus', () => { if (noteEdit) noteEdit.focus = true; });
+    ta.addEventListener('blur', () => { if (noteEdit) noteEdit.focus = false; });
+    ta.addEventListener('keydown', ev => {
+      if (ev.key === 'Escape') { ev.preventDefault(); cancelEdit(); }
+      else if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); if (!save.disabled) saveEdit(n); }
+    });
+    save.addEventListener('click', () => saveEdit(n));
+    cancel.addEventListener('click', cancelEdit);
+    const bar = el('div', 'note-edit-bar'); bar.append(count, cancel, save);
+    box.append(ta, bar);
+    upd8();
+    return box;
+  }
+  function cancelEdit() {
+    const id = noteEdit && noteEdit.id; noteEdit = null; renderNotes();
+    const b = id && document.querySelector(`#notesList .note-item[data-id="${id}"] .note-btns button`); if (b) b.focus();
+  }
+  async function saveEdit(n) {
+    const text = L.cleanNoteText(noteEdit ? noteEdit.text : '');
+    if (!text) { toast(`Notes are 1–${L.NOTE_MAX} characters`, true); return; }
+    const id = n.id, key = 'note:' + id, v = st.overrides[key];
+    noteEdit = null;
+    if (text === n.text) { renderNotes(); return; }
+    // Still only on this device (queued add, not sent): rewrite the add. Otherwise queue an edit for every device.
+    if (v && v.op === 'add' && !sync.sent[key]) await setLocal(key, { op: 'add', text, createdAt: v.createdAt });
+    else await setLocal(key, { op: 'edit', text, createdAt: n.createdAt || (v && v.createdAt) || null });
+    const b = document.querySelector(`#notesList .note-item[data-id="${id}"] .note-btns button`); if (b) b.focus({ preventScroll: true });
+    toast('Note updated · syncing to your other devices');
   }
   function updateNoteCounter() {
     const v = $('noteInput').value, n = v.trim().length;
@@ -742,13 +847,45 @@
     await setLocal('note:' + newNoteId(), { op: 'add', text, createdAt: new Date().toISOString() });
     toast('Note saved · syncing to your other devices');
   }
-  async function deleteNote(n) {
-    if (!confirm('Delete this note on all devices?\n\n' + n.text.slice(0, 200))) return;
-    const key = 'note:' + n.id, v = st.overrides[key];
-    // Never left this device (queued, not sent): just drop it. Otherwise queue a delete for every device.
-    if (n.pending && v && v.op === 'add' && !sync.sent[key]) { await delLocal(key); return; }
-    await setLocal(key, { op: 'delete' });
+  // Delete: hide now, show "Deleted · Undo" for ~6 s, then queue. A newer delete commits the older one at once.
+  function deleteNote(n) {
+    for (const id of [...noteUndo.keys()]) commitDelete(id);
+    if (noteEdit && noteEdit.id === n.id) noteEdit = null;
+    noteUndo.set(n.id, { note: n, timer: setTimeout(() => commitDelete(n.id), UNDO_MS) });
+    renderNotes();
+    showUndo();
   }
+  async function commitDelete(id) {
+    const u = noteUndo.get(id); if (!u) return;
+    clearTimeout(u.timer); noteUndo.delete(id);
+    if (!noteUndo.size) hideUndo();
+    const key = 'note:' + id, v = st.overrides[key];
+    // Never left this device (queued add, not sent): just drop it. Otherwise queue a delete for every device.
+    if (u.note.pending && v && v.op === 'add' && !sync.sent[key]) await delLocal(key);
+    else await setLocal(key, { op: 'delete' });
+  }
+  function undoDelete() {
+    const ids = [...noteUndo.keys()];
+    for (const id of ids) clearTimeout(noteUndo.get(id).timer);
+    noteUndo.clear(); hideUndo(); renderNotes();
+    const b = ids.length && document.querySelector(`#notesList .note-item[data-id="${ids[ids.length - 1]}"] .note-btns button`);
+    if (b) b.focus();
+    toast('Note restored');
+  }
+  function showUndo() {
+    const bar = $('undoBar');
+    $('undoMsg').textContent = 'Note deleted';
+    bar.classList.remove('hidden');
+    bar.style.setProperty('--undo-ms', UNDO_MS + 'ms');
+    bar.classList.remove('run'); void bar.offsetWidth; bar.classList.add('run');
+    $('undoBtn').focus({ preventScroll: true });
+  }
+  function hideUndo() {
+    const bar = $('undoBar'); bar.classList.add('hidden'); bar.classList.remove('run');
+    if (document.activeElement === $('undoBtn')) { const f = $('noteInput'); if (f && f.offsetParent) f.focus({ preventScroll: true }); }
+  }
+  // Leaving the page while the toast is up commits the delete (it was the user's intent).
+  function flushNoteDeletes() { for (const id of [...noteUndo.keys()]) commitDelete(id); }
 
   function renderMoney(today) {
     const rows = L.moneyItems(st.data, st.overrides, today);
@@ -962,6 +1099,7 @@
     if (c.type === 'charging.charged') return `Charged: ${find((d.charging || {}).devices).name || c.id}`;
     if (c.type === 'notice.status') return `${c.status === 'done' ? 'Done' : 'Reopened'}: ${find((d.notices || {}).items).title || c.id}`;
     if (c.type === 'note.add') return 'Note: ' + (String(c.text || '').length > 40 ? String(c.text).slice(0, 40) + '…' : c.text);
+    if (c.type === 'note.edit') return 'Edit note: ' + (String(c.text || '').length > 40 ? String(c.text).slice(0, 40) + '…' : c.text);
     if (c.type === 'note.delete') return 'Delete note: ' + ((find((d.notes || {}).items).text || c.id).slice(0, 40));
     if (c.type === 'supply.update') return `${c.lastBought ? 'Bought' : c.status === 'out' ? 'Out' : c.status === 'low' ? 'Low' : 'OK'}: ${find((d.supplies || {}).items).name || c.id}`;
     const m = find((d.money || {})[c.type === 'card.status' ? 'cards' : 'bills']);
@@ -1258,6 +1396,9 @@
     $('noteInput').addEventListener('input', updateNoteCounter);
     $('noteInput').addEventListener('keydown', ev => { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); if (!$('addNoteBtn').disabled) addNote(); } });
     $('addNoteBtn').addEventListener('click', addNote);
+    $('undoBtn').addEventListener('click', undoDelete);
+    window.addEventListener('pagehide', flushNoteDeletes);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushNoteDeletes(); });
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('message', ev => {
         const d = ev.data || {};

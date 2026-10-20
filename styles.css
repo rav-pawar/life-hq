@@ -246,3 +246,60 @@ details.appl > summary .chev { float: none; flex: none; }
 .item.task .right { gap: 8px; }
 /* The v12 clearfix ::after would become a flex item and push the chevron off the right edge. */
 .card-lite > summary::after, details.appl > summary::after, details.more > summary::after { content: none; display: none; }
+
+/* ===== v14 ===== */
+/* Nav: fits without scrolling from 900px up (tighter pills, logo-only brand until there is room for the title). */
+@media (min-width: 641px) and (max-width: 1180px) {
+  .topbar { gap: 8px; }
+  .brand h1 { display: none; }
+  .tabs { gap: 4px; padding: 0 4px; }
+  .tabs a { padding: 6px 9px; font-size: .85rem; }
+}
+@media (min-width: 900px) {
+  .tabs { -webkit-mask-image: none; mask-image: none; }   /* nothing to fade when everything fits */
+}
+/* Today: festival tip collapsed to a one-line teaser */
+details.fest-tip { padding: 10px 14px; }
+details.fest-tip > summary { display: flex; align-items: center; gap: 8px; min-height: 28px; border-radius: 8px; }
+details.fest-tip > summary::after, details.more-rows > summary::after { content: none; display: none; }
+details.fest-tip > summary .title { margin: 0; }
+details.fest-tip > summary .teaser { margin: 2px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+details.fest-tip[open] > summary .teaser { display: none; }
+details.fest-tip > summary .tip-count { flex: none; white-space: nowrap; }
+details.fest-tip > summary .chev { float: none; flex: none; }
+details.fest-tip .fest-lines { margin: 8px 0 8px; padding-left: 1.2em; display: grid; gap: 6px; line-height: 1.45; }
+details.fest-tip > summary:focus-visible, details.more-rows > summary:focus-visible { outline: 2px solid #8fb6ff; outline-offset: 2px; }
+/* "N more today" / "N more" folds */
+details.more-rows > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 4px;
+  color: #8fb6ff; font-size: .9rem; min-height: 40px; border-radius: 8px; }
+details.more-rows > summary .chev { float: none; }
+details.more-rows > .list { margin-top: 4px; }
+/* Notes: actions + inline editor */
+.note-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.note-edit { display: grid; gap: 8px; }
+.note-edit-input { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; color: var(--text); background: var(--card2);
+  border: 1px solid #3a4160; border-radius: 10px; padding: 8px 10px; line-height: 1.4; }
+.note-edit-input:focus-visible { outline: 2px solid #8fb6ff; outline-offset: 1px; }
+.note-edit-bar { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.note-edit-bar .note-counter { margin-right: auto; }
+.note-item.editing .sub { margin-top: 6px; }
+/* "Note deleted · Undo" bar: bottom centre, ~6 s, with a shrinking timer line */
+.undo-bar { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 103;
+  display: flex; align-items: center; gap: 14px; padding: 8px 8px 8px 16px; border-radius: 12px; overflow: hidden;
+  background: #232838; color: var(--text); border: 1px solid #3a4160; box-shadow: 0 4px 18px rgba(0, 0, 0, .5); font-size: .92rem;
+  max-width: calc(100vw - 24px); white-space: nowrap; }
+.undo-bar.hidden { display: none; }
+.undo-btn { appearance: none; border: 0; background: none; color: #8fb6ff; font: inherit; font-weight: 700; padding: 8px 12px;
+  border-radius: 8px; cursor: pointer; min-height: 40px; }
+.undo-btn:hover { background: #2c3350; }
+.undo-btn:focus-visible { outline: 2px solid #8fb6ff; outline-offset: 1px; }
+.undo-time { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: #8fb6ff; transform-origin: left; opacity: .7; }
+.undo-bar.run .undo-time { animation: undo-shrink var(--undo-ms, 6000ms) linear forwards; }
+@keyframes undo-shrink { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) { .undo-bar.run .undo-time { animation: none; } }
+.item .right.note-btns { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.item .right.note-btns .btn { min-width: 72px; }
+@media (min-width: 641px) { .item .right.note-btns { flex-direction: row; align-items: center; } }
+/* Lists inside <details> keep their own spacing (the generic details ul/li margins doubled it). */
+details .todo-list, details .cal-list { margin: 6px 0 0; padding: 0; }
+details .todo-list li, details .cal-list li, details.fest-tip .fest-lines li { margin: 0; }

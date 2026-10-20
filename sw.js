@@ -2,7 +2,7 @@
    The encrypted data file is fetched network-first; plaintext is never cached. */
 importScripts('./config.js', './db.js');
 
-const CACHE = 'life-hq-v10'; // v10: force refresh for Mac mini + festivals; v9: festival day observe tips; v8: festivals section; v7: sync token auto-provisioned from the encrypted data; v6: sync back (encrypted inbox); v5: auto-refresh + network-first data (v4: single-row header; v3: per-device keys, data v2)
+const CACHE = 'life-hq-v11'; // v11: update checker (every 2.5 min + on focus) with idle-gated apply / "Update available" pill, cache-busted shell install (keep APP_VERSION in app.js equal); v10: force refresh for Mac mini + festivals; v9: festival day observe tips; v8: festivals section; v7: sync token auto-provisioned from the encrypted data; v6: sync back (encrypted inbox); v5: auto-refresh + network-first data (v4: single-row header; v3: per-device keys, data v2)
 const DATA_KEY = new URL('./data.enc.json', self.registration.scope).href; // cached without the cache-busting query
 const SHELL = [
   './', './index.html', './styles.css', './app.js', './db.js', './config.js', './logic.js', './crypto.js',
@@ -10,9 +10,21 @@ const SHELL = [
 ];
 
 self.addEventListener('install', event => {
-  // cache:'reload' so the new shell is not taken from the HTTP cache (GitHub Pages max-age=600).
-  // skipWaiting + clients.claim: installed PWAs switch to the new code at once (the page reloads itself once).
-  event.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
+  // Each shell file is fetched with a cache-busting query + no-store, so neither the HTTP cache (GitHub Pages max-age=600)
+  // nor a CDN edge can hand the new worker an old copy; it is stored under the clean URL.
+  // skipWaiting + clients.claim: the new worker takes over at once; open pages show "Update available" and reload
+  // when you are idle (they can also ask with a SKIP_WAITING message).
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    await Promise.all(SHELL.map(async u => {
+      const clean = new URL(u, self.registration.scope);
+      const bust = new URL(clean.href); bust.searchParams.set('v', CACHE);
+      const res = await fetch(bust.href, { cache: 'no-store' });
+      if (!res.ok) throw new Error('shell fetch failed: ' + u + ' ' + res.status);
+      await cache.put(clean.href, res);
+    }));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', event => {
@@ -29,6 +41,7 @@ self.addEventListener('fetch', event => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+  if (url.pathname.endsWith('/sw.js')) return; // update checks always go to the network
   if (url.pathname.endsWith('/data.enc.json')) {
     // Network-first (no-store, query keeps the CDN from answering with a stale copy) so a fresh publish shows up
     // at once; the cached copy keeps it working offline and is marked X-Life-HQ-Offline: 1 for the page.
@@ -42,8 +55,9 @@ self.addEventListener('fetch', event => {
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const cached = await cache.match(req, { ignoreSearch: req.mode === 'navigate' });
-    const network = fetch(req).then(res => {
-      if (res && res.ok && res.type === 'basic') cache.put(req, res.clone());
+    // Revalidate (no-cache: conditional request, not the possibly-stale HTTP cache); don't store one-off ?query copies.
+    const network = fetch(req, { cache: 'no-cache' }).then(res => {
+      if (res && res.ok && res.type === 'basic' && (!url.search || req.mode === 'navigate')) cache.put(req.mode === 'navigate' ? url.origin + url.pathname : req, res.clone());
       return res;
     }).catch(() => null);
     if (cached) { event.waitUntil(network); return cached; }
@@ -131,6 +145,7 @@ self.addEventListener('push', event => {
 // Local test from the page ("Test notification" button), goes through the same path as a real push.
 self.addEventListener('message', event => {
   const d = event.data || {};
+  if (d.kind === 'SKIP_WAITING' || d === 'SKIP_WAITING') { self.skipWaiting(); return; }
   if (d.kind === 'test-push') event.waitUntil(handleIncoming(d.payload));
 });
 

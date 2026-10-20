@@ -134,6 +134,12 @@ main > *, #dash > * { min-width: 0; max-width: 100%; }
 .toast.warn { background: var(--amber-bg); color: #ffd27a; border-color: var(--amber-border); }
 .sync-info:empty { display: none; }
 @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+/* "Update available" pill, just below the header (applied automatically when idle, or on tap) */
+.upd-pill { position: fixed; left: 50%; top: calc(var(--header-total) + 8px); z-index: 102; transform: translateX(-50%);
+  appearance: none; cursor: pointer; background: #142a4d; color: #cfe0ff; border: 1px solid #2f5596; border-radius: 999px;
+  padding: 5px 14px; font: inherit; font-size: .85rem; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 10px rgba(0, 0, 0, .4); }
+.upd-pill:hover { border-color: var(--blue); }
+.upd-pill:focus-visible { outline: 2px solid #8fb6ff; outline-offset: 1px; }
 
 /* ---- Sync back ---- */
 .sync-setup { margin-top: 14px; padding-top: 12px; border-top: 1px solid #262a38; }

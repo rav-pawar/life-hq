@@ -6,6 +6,8 @@
   const L = self.LifeLogic;
   const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   let reg = null;
+  // Version of this page's code; must equal CACHE in sw.js (bump both together). A different live sw.js = new code.
+  const APP_VERSION = 'life-hq-v11';
 
   // In-memory only. Plaintext data is never written to storage.
   const st = { env: null, device: null, data: null, overrides: {}, flashId: null, noData: false, lastSync: 0, offline: false, lastCheck: 0 };
@@ -390,12 +392,23 @@
     if (Math.abs(d) >= 1) window.scrollBy(0, d);
   }
   async function renderPreserving() {
+    upd.lastRender = Date.now();
     const a = scrollAnchor();
     await renderAll();
     restoreAnchor(a);
     updateActivePill();
   }
-  // Fetch data.enc.json; re-decrypt and re-render only when the ciphertext changed.
+  // ================= Updates: check often, apply only when the user is idle =================
+  // Every ~2.5 min while visible (and on visible / focus / online) we check for new encrypted data and for new app code.
+  // Nothing re-renders or reloads while you are using the page: a pending update shows the "Update available" pill in
+  // the header (tap = apply now) and is applied automatically after 10 s without interaction, while the page is visible,
+  // no text field is focused and neither Settings nor a confirm dialog is open.
+  // Data updates re-render in place (scroll position kept); code updates activate the new service worker and reload once.
+  const IDLE_MS = 10000, CHECK_MS = 150000, TICK_MS = 60000;
+  const upd = { env: null, rejected: '', alerts: false, tick: false, code: false, codeVersion: '', codeAuto: true,
+    lastActivity: Date.now(), lastRender: Date.now(), lastCodeCheck: 0, timer: 0, applying: false, reloading: false, dialogs: 0, hadController: false };
+
+  // Fetch data.enc.json; a changed ciphertext becomes a pending update (applied by the idle gate, never immediately).
   let refreshing = null, trailing = 0;
   function refreshData(reason, force) {
     if (refreshing) return refreshing;
@@ -404,28 +417,145 @@
       if (!trailing) trailing = setTimeout(() => { trailing = 0; refreshData(reason, true); }, wait);
       return Promise.resolve(false);
     }
-    refreshing = doRefresh(reason).catch(e => { console.error('refresh failed', e); return false; }).finally(() => { refreshing = null; st.lastCheck = Date.now(); });
+    refreshing = checkData(reason).catch(e => { console.error('refresh failed', e); return false; }).finally(() => { refreshing = null; st.lastCheck = Date.now(); });
     return refreshing;
   }
-  async function doRefresh(reason) {
+  async function checkData(reason) {
     if (!st.device) return false;
     const env = await loadEnvelope();
-    if (st.data && (!env || envFp(env) === envFp(st.env))) { await renderPreserving(); return false; } // offline or unchanged
-    if (!env) return false; // offline / nothing published yet: keep the current screen
+    const fp = envFp(env);
+    if (!env || fp === envFp(st.env) || fp === upd.rejected) {
+      if (env && fp === envFp(st.env)) upd.env = null; // published copy is what we show (again)
+      // Unchanged / offline: still refresh time-dependent text ("leave in 20 min") now and then, when idle.
+      if (st.data && Date.now() - upd.lastRender >= TICK_MS) upd.tick = true;
+      scheduleApply();
+      return false;
+    }
+    upd.env = env;
+    document.body.dataset.pending = 'data'; // marker for the headless test
+    scheduleApply();
+    return true;
+  }
+  // Decrypt + render a new envelope (called only via applyPending).
+  async function applyData(env) {
     const prev = st.data, prevEnv = st.env, noData = st.noData;
     st.env = env;
     const msg = await tryDecrypt();
     if (msg) {
       if (prev || !noData) { await showLock(msg); return false; } // removed / tampered: show nothing, as on a reload
-      st.env = prevEnv; return false;                              // "alerts only" mode: stay there
+      st.env = prevEnv; upd.rejected = envFp(env); return false; // "alerts only" mode: stay there, don't offer it again
     }
-    if (!prev) { await openDashboard(); if (reason !== 'load') toast('Updated just now'); return true; }
+    if (!prev) { await openDashboard(); toast('Updated just now'); return true; }
     await renderPreserving();
     const nApplied = sync.justApplied || 0; sync.justApplied = 0;
     if (nApplied) toast(`Updated · ${nApplied} change${nApplied === 1 ? '' : 's'} applied`);
     else if (prev.updatedAt !== st.data.updatedAt || envFp(prevEnv) !== envFp(env)) toast('Updated just now');
     document.body.dataset.refreshed = String(Date.now()); // marker for the headless test
     return true;
+  }
+
+  // New app code: ask the browser to re-check sw.js (bypassing the HTTP cache: updateViaCache 'none'), look for an
+  // installing / waiting worker, and compare the live sw.js version (no-store + cache-busting query, so neither the
+  // GitHub CDN nor the HTTP cache can hide it) with the version of the code running in this page.
+  async function checkCode(force) {
+    if (!reg || upd.reloading) return;
+    if (!force && Date.now() - upd.lastCodeCheck < 30000) return;
+    upd.lastCodeCheck = Date.now();
+    try { await reg.update(); } catch (e) { /* offline */ }
+    watchWorker(reg.installing); if (reg.waiting) markCode('');
+    try {
+      const res = await fetch('./sw.js?t=' + Date.now().toString(36), { cache: 'no-store' });
+      const m = res.ok && /const CACHE = '([^']+)'/.exec(await res.text());
+      if (m && m[1] !== APP_VERSION) markCode(m[1]);
+    } catch (e) { /* offline */ }
+  }
+  function watchWorker(w) {
+    if (!w || w.lhqWatched) return;
+    w.lhqWatched = true;
+    // Only an update of an already-controlled page counts (the very first install has nothing old to replace).
+    w.addEventListener('statechange', () => { if (upd.hadController && (w.state === 'installed' || w.state === 'activated')) markCode(''); });
+  }
+  function markCode(version) {
+    if (!upd.code) console.info('Life HQ: new app version available', version || '(service worker)');
+    upd.code = true;
+    if (version) upd.codeVersion = version;
+    // Loop guard: if we already reloaded for this version and the page is still old, wait for a tap instead.
+    try { if (version && sessionStorage.getItem('lhqReloadedFor') === version) upd.codeAuto = false; } catch (e) { /* ignore */ }
+    document.body.dataset.pending = 'code';
+    scheduleApply();
+  }
+  async function applyCode() {
+    if (upd.reloading) return;
+    upd.reloading = true;
+    try { sessionStorage.setItem('lhqReloadedFor', upd.codeVersion || 'sw'); } catch (e) { /* ignore */ }
+    try {
+      if (reg && !reg.waiting && !reg.installing && upd.codeVersion) await reg.update().catch(() => {});
+      const w = reg && (reg.waiting || reg.installing);
+      if (w) {
+        // Let the new worker take over (it normally does by itself: skipWaiting), then reload once.
+        const took = new Promise(r => { navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }); setTimeout(r, 5000); });
+        const kick = () => { if (w.state === 'installed') w.postMessage({ kind: 'SKIP_WAITING' }); };
+        kick(); w.addEventListener('statechange', kick);
+        if (w.state !== 'activated') await took;
+      }
+    } catch (e) { console.error('update failed', e); }
+    location.reload();
+  }
+
+  // ---- Idle gate ----
+  function userBusy() {
+    if (document.hidden) return 'hidden';
+    if (Date.now() - upd.lastActivity < IDLE_MS) return 'active';
+    const a = document.activeElement;
+    if (a && (a.isContentEditable || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' ||
+      (a.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|reset|range|color|file|image)$/i.test(a.type)))) return 'typing';
+    if (!$('settings').classList.contains('hidden')) return 'settings';
+    if (upd.dialogs) return 'dialog';
+    if (nav.lockId) return 'scrolling';
+    return '';
+  }
+  const hasPending = () => !!(upd.env || upd.alerts || upd.code);
+  function syncPill() {
+    const p = $('updPill'); if (!p) return;
+    p.classList.toggle('hidden', !hasPending() || upd.reloading);
+    if (!hasPending()) delete document.body.dataset.pending;
+  }
+  function scheduleApply() {
+    syncPill();
+    const need = hasPending() || upd.tick;
+    if (need && !upd.timer) upd.timer = setInterval(() => { if (!userBusy()) applyPending(false); }, 1000);
+    else if (!need && upd.timer) { clearInterval(upd.timer); upd.timer = 0; }
+  }
+  async function applyPending(manual) {
+    if (upd.applying || upd.reloading) return;
+    upd.applying = true;
+    try {
+      if (upd.code && (manual || upd.codeAuto)) { await applyCode(); return; } // the reload brings the new data too
+      const env = upd.env, alerts = upd.alerts, tick = upd.tick;
+      upd.env = null; upd.alerts = false; upd.tick = false;
+      if (env) await applyData(env);
+      else if ((alerts || tick) && (st.data || st.noData)) await renderPreserving();
+    } catch (e) { console.error('applying update failed', e); }
+    finally { upd.applying = false; if (!upd.reloading) scheduleApply(); }
+  }
+  function checkAll(reason, force) {
+    if (document.hidden) return;
+    refreshData(reason, force);
+    checkCode(force);
+  }
+  function wireUpdates() {
+    for (const t of ['pointerdown', 'keydown', 'scroll', 'wheel', 'touchstart', 'input']) {
+      addEventListener(t, () => { upd.lastActivity = Date.now(); }, { passive: true, capture: true });
+    }
+    // Native confirm() blocks the page; count it as "dialog open" and as activity when it closes.
+    const nativeConfirm = window.confirm.bind(window);
+    window.confirm = msg => { upd.dialogs++; try { return nativeConfirm(msg); } finally { upd.dialogs--; upd.lastActivity = Date.now(); } };
+    $('updPill').addEventListener('click', () => applyPending(true));
+    document.addEventListener('visibilitychange', () => checkAll('visible'));
+    addEventListener('focus', () => checkAll('focus'));
+    addEventListener('pageshow', ev => { if (ev.persisted) checkAll('pageshow', true); });
+    addEventListener('online', () => checkAll('online', true));
+    setInterval(() => checkAll('poll', true), CHECK_MS);
   }
 
   // ================= Render: sections =================
@@ -630,6 +760,7 @@
   }
 
   async function renderAll() {
+    upd.lastRender = Date.now();
     await loadOverrides();
     if (st.data) {
       const now = nowMs(), today = L.istDate(now);
@@ -717,17 +848,15 @@
   }
   async function registerSW() {
     if (!('serviceWorker' in navigator)) return null;
-    // updateViaCache:'none': sw.js and its imports are always revalidated, so a new version is found quickly.
-    const hadController = !!navigator.serviceWorker.controller;
+    // updateViaCache:'none': sw.js and its imports always bypass the HTTP cache (GitHub Pages max-age=600) on update checks.
+    const hadController = upd.hadController = !!navigator.serviceWorker.controller;
     reg = await navigator.serviceWorker.register('./sw.js', { scope: './', updateViaCache: 'none' });
-    // The new SW calls skipWaiting + clients.claim; when it takes over, reload once (now, or when next visible).
-    let reloading = false;
-    const reloadNow = () => { if (!reloading) { reloading = true; location.reload(); } };
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!hadController) return; // first install: nothing old is running
-      if (document.hidden) document.addEventListener('visibilitychange', () => { if (!document.hidden) reloadNow(); }, { once: true });
-      else reloadNow();
-    });
+    // A new worker takes control (skipWaiting + clients.claim): mark the code update as pending; the idle gate
+    // reloads once (no reload while you are using the page).
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) markCode(''); });
+    reg.addEventListener('updatefound', () => watchWorker(reg.installing));
+    watchWorker(reg.installing);
+    if (reg.waiting && hadController) markCode('');
     await navigator.serviceWorker.ready;
     return reg;
   }
@@ -875,25 +1004,22 @@
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('message', ev => {
         const d = ev.data || {};
-        if (d.kind === 'alert' || d.kind === 'focus-alert') { const id = d.kind === 'alert' ? d.alert && d.alert.id : d.id; if (st.data || st.noData) renderAlerts(id); else st.flashId = id; }
-        if (d.kind === 'alert' || d.kind === 'focus-alert' || d.kind === 'refresh-data') refreshData('push', true); // a push usually means new data
-        else if (d.kind === 'sub-changed') { refreshSetup(); refreshEnroll(); }
+        if (d.kind === 'focus-alert') {
+          // You tapped the notification: show it now (explicit action), with any new data.
+          if (st.data || st.noData) renderAlerts(d.id); else st.flashId = d.id;
+          refreshData('push', true).then(async () => { const e = upd.env; if (e) { upd.env = null; await applyData(e).catch(console.error); scheduleApply(); } });
+        } else if (d.kind === 'alert' || d.kind === 'refresh-data') {
+          // A push arrived while the page is open: the new alert / data waits for the idle gate.
+          if (d.kind === 'alert') { upd.alerts = true; scheduleApply(); }
+          refreshData('push', true); // a push usually means new data
+        } else if (d.kind === 'sub-changed') { refreshSetup(); refreshEnroll(); }
       });
     }
     // No auto-lock and no prompt: an enrolled device opens the data directly until 🔒 Lock / Forget this device.
-    // Auto-refresh: when visible again, on focus / bfcache restore / back online, and every 60 s while visible.
+    // Update checks (data + code) and the idle gate: see wireUpdates().
     // (Also picks up "maybe the assistant has published for this device meanwhile" on the enroll screen.)
-    let lastSwCheck = 0;
-    const onVisible = reason => {
-      if (document.hidden) return;
-      refreshData(reason);
-      if (reg && Date.now() - lastSwCheck > 10 * 60000) { lastSwCheck = Date.now(); reg.update().catch(() => {}); }
-    };
-    document.addEventListener('visibilitychange', () => onVisible('visible'));
-    addEventListener('focus', () => onVisible('focus'));
-    addEventListener('pageshow', ev => { if (ev.persisted) onVisible('pageshow'); });
-    addEventListener('online', () => onVisible('online'));
-    setInterval(() => { if (!document.hidden) refreshData('poll'); if (sync.lastError && Date.now() - sync.lastTry > 60000) scheduleSync(0); }, 60000);
+    wireUpdates();
+    setInterval(() => { if (sync.lastError && Date.now() - sync.lastTry > 60000) scheduleSync(0); }, 60000);
   }
 
   async function init() {
@@ -914,6 +1040,7 @@
     }
     await unlockFlow();
     st.lastCheck = Date.now();
+    checkCode(true); // a tab opened from a stale cached shell finds the new version right away
     renderSyncState().catch(() => {});
     scheduleSync(3000); // anything queued from last time (e.g. tapped while offline)
   }

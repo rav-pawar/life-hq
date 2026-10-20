@@ -114,10 +114,40 @@
   }
 
   // ---- School ----
+  // school.holidays: 'YYYY-MM-DD' strings, or { date: 'YYYY-MM-DD', name: 'Founders Day' } objects (name optional).
+  function holidayEntry(data, ymd) {
+    for (const h of (((data || {}).school || {}).holidays || [])) {
+      if (h === ymd) return { date: ymd, name: null };
+      if (h && typeof h === 'object' && h.date === ymd) return { date: ymd, name: h.name ? String(h.name) : null };
+    }
+    return null;
+  }
+  const holidayDates = data => ((((data || {}).school || {}).holidays) || []).map(h => typeof h === 'string' ? h : (h && h.date)).filter(isYMD);
+  const schoolDays = data => (((data || {}).school || {}).days) || [1, 2, 3, 4, 5];
   function schoolDay(data, today) {
-    const sc = data.school || {};
-    const days = sc.days || [1, 2, 3, 4, 5];
-    return days.includes(weekdayOf(today)) && !(sc.holidays || []).includes(today);
+    return schoolDays(data).includes(weekdayOf(today)) && !holidayEntry(data, today);
+  }
+  // Why there is no school on `today` (null on a school day): { kind: 'holiday' | 'weekend' | 'off', name }.
+  // A holiday without a name borrows the festival day label for that date.
+  function noSchoolReason(data, today) {
+    if (schoolDay(data, today)) return null;
+    const h = holidayEntry(data, today);
+    if (h) {
+      let name = h.name;
+      if (!name) {
+        for (const f of festivalList(data)) {
+          const named = (f.days || []).find(d => d && d.date === today && d.label);
+          if (named) { name = named.label; break; }
+        }
+      }
+      return { kind: 'holiday', name: name || 'Holiday' };
+    }
+    const wd = weekdayOf(today);
+    return wd === 0 || wd === 6 ? { kind: 'weekend', name: 'Weekend' } : { kind: 'off', name: 'No school day' };
+  }
+  function nextSchoolDay(data, today, maxDays) {
+    for (let i = 1; i <= (maxDays || 60); i++) { const d = addDays(today, i); if (schoolDay(data, d)) return d; }
+    return null;
   }
 
   // ---- Charging ----
@@ -215,6 +245,10 @@
       if (m.daysLeft <= 0) out.push({ sev: 'urgent', section: 'money', text: `${m.label}: ${m.daysLeft === 0 ? 'due today' : 'overdue by ' + (-m.daysLeft) + ' day' + (m.daysLeft === -1 ? '' : 's')}` });
       else if (m.daysLeft <= s.cardAlertDays) out.push({ sev: 'urgent', section: 'money', text: `${m.label}: due ${relDays(m.daysLeft)} (${fmtDate(m.dueDate)})` });
     }
+    const noSchool = noSchoolReason(data, today);
+    if (noSchool && noSchool.kind === 'holiday' && schoolDays(data).includes(weekdayOf(today)) && ((data.school || {}).runs || []).length) {
+      out.push({ sev: 'info', section: 'family', text: `🥳 No school today: ${noSchool.name}` });
+    }
     if (schoolDay(data, today)) {
       for (const r of ((data.school || {}).runs || [])) {
         const t = hhmmToMin(r.leaveAt);
@@ -293,7 +327,7 @@
   }
 
   g.LifeLogic = { istDate, istMinutes, istWeekday, addDays, daysBetween, weekdayOf, hhmmToMin, fmtTime, fmtDate, relDays, isYMD,
-    settingsOf, nextMaintenanceSaturday, isMaintenanceSaturday, maintenanceTasks, maintenanceWeekend, moneyItems, schoolDay,
+    settingsOf, nextMaintenanceSaturday, isMaintenanceSaturday, maintenanceTasks, maintenanceWeekend, moneyItems, schoolDay, holidayEntry, holidayDates, noSchoolReason, nextSchoolDay,
     chargingDevices, supplyItems, festivalDayInfo, festivalTriviaToday, activeFestivals, upcomingFestivals,
     todayItems, dueAlerts, sensitiveReason };
   if (typeof module === 'object' && module.exports) module.exports = g.LifeLogic;

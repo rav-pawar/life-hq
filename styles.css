@@ -169,3 +169,24 @@ main > *, #dash > * { min-width: 0; max-width: 100%; }
 .fest-trivia li { margin: 4px 0; font-size: .92rem; }
 .fest-trivia .hint { color: var(--muted); font-size: .85rem; }
 .fest-card.compact .fest-title { font-size: .98rem; font-weight: 600; }
+
+/* ---- v12: alert cards, Older group, spacing ---- */
+/* Meta row: timestamp (+ link) on the left, action buttons on the right; wraps cleanly at narrow widths. */
+.item .meta { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; margin-top: 10px; }
+.item .meta .meta-left { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; }
+.item .meta .meta-btns { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; flex: none; margin-left: auto; }
+details summary::after { content: ""; display: block; clear: both; }
+.item > details > ul { margin-bottom: 0; }
+.item.old { opacity: .7; }
+.item.urgent.old { background: var(--card); border-color: #262a38; border-left-color: #7a2229; }
+.head-right { display: flex; align-items: center; gap: 8px; flex: none; }
+.section-head { gap: 8px; flex-wrap: wrap; }
+.old-group > summary { display: flex; align-items: center; justify-content: space-between; padding: 8px 2px; }
+.old-group > summary .chev { float: none; }
+.old-group > .list { margin-top: 6px; }
+/* Consistent gaps between sections and before the "Changes to sync" card. */
+#dash > .sec { margin-bottom: 0; }
+#dash > .sec > .list:last-child, #dash > .sec > div:last-child { margin-bottom: 0; }
+#s-sync { margin-top: 22px; }
+#s-sync textarea { margin: 8px 0; }
+.item.next-school { border-left: 5px solid var(--blue); }

@@ -7,7 +7,7 @@
   const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   let reg = null;
   // Version of this page's code; must equal CACHE in sw.js (bump both together). A different live sw.js = new code.
-  const APP_VERSION = 'life-hq-v11';
+  const APP_VERSION = 'life-hq-v12';
 
   // In-memory only. Plaintext data is never written to storage.
   const st = { env: null, device: null, data: null, overrides: {}, flashId: null, noData: false, lastSync: 0, offline: false, lastCheck: 0 };
@@ -605,7 +605,23 @@
     const nowMin = L.istMinutes(now);
     const win = L.settingsOf(st.data).leaveWindowMinutes;
     const days = (sc.days || [1, 2, 3, 4, 5]).map(d => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d]);
-    const out = [el('p', 'muted small', (isDay ? '✅ School day today' : '😴 No school today') + ' · ' + (days.length === 5 && days[0] === 'Mon' ? 'Monday to Friday' : days.join(', ')))];
+    const daysTxt = days.length === 5 && days[0] === 'Mon' ? 'Monday to Friday' : days.join(', ');
+    if (!isDay) {
+      // Holiday / weekend: no drop-off / pick-up cards, just when school is next.
+      const why = L.noSchoolReason(st.data, today);
+      const out = [el('p', 'muted small', `🥳 No school today: ${why ? why.name : 'Holiday'}`)];
+      const next = L.nextSchoolDay(st.data, today);
+      const runs = sc.runs || [];
+      if (next && runs.length) {
+        const c = row('next-school', `📅 Next school day: ${L.fmtDate(next)} (${L.relDays(L.daysBetween(today, next))})`,
+          runs.map(r => `${r.label}: leave at ${L.fmtTime(r.leaveAt)}` + (r.eventAt ? ` (${L.fmtTime(r.eventAt)})` : '')));
+        out.push(c);
+      }
+      appendHolidays(out, sc, today, daysTxt);
+      $('familyList').replaceChildren(...out);
+      return;
+    }
+    const out = [el('p', 'muted small', '✅ School day today · ' + daysTxt)];
     for (const r of (sc.runs || [])) {
       const delta = L.hhmmToMin(r.leaveAt) - nowMin;
       const urgent = isDay && Math.abs(delta) <= win;
@@ -614,9 +630,15 @@
       out.push(row(urgent ? 'urgent' : (done ? 'past' : (isDay && delta > 0 && delta <= 60 ? 'warn' : '')), (urgent ? '🚨 Leave now: ' : '') + r.label, sub,
         isDay ? pill(done ? 'done' : (delta > 0 ? 'in ' + (delta >= 60 ? Math.floor(delta / 60) + 'h ' : '') + (delta % 60) + 'm' : 'now'), urgent ? 'red' : '') : null));
     }
-    const upcoming = (sc.holidays || []).filter(h => h >= today).slice(0, 5);
-    if (upcoming.length) out.push(el('p', 'muted small', 'Holidays: ' + upcoming.map(L.fmtDate).join(', ')));
+    appendHolidays(out, sc, today);
     $('familyList').replaceChildren(...out);
+  }
+  function appendHolidays(out, sc, today, daysTxt) {
+    const upcoming = L.holidayDates(st.data).filter(h => h > today).sort().slice(0, 5);
+    const parts = [];
+    if (daysTxt) parts.push('School days: ' + daysTxt);
+    if (upcoming.length) parts.push('Holidays: ' + upcoming.map(L.fmtDate).join(', '));
+    if (parts.length) out.push(el('p', 'muted small', parts.join(' · ')));
   }
 
   function renderCharging(now, today) {
@@ -778,24 +800,25 @@
   function actionBtn(label, cls, id, newStatus) { return btn(label, cls, async () => { await HQDB.setStatus(id, newStatus); renderAlerts(); }); }
   function metaRow(a, b) {
     const m = el('div', 'meta');
-    const left = el('div');
+    const left = el('div', 'meta-left');
     left.appendChild(el('span', 'ts', fmtIST(a.ts || a.receivedAt)));
     const href = a.url && safeLink(a.url);
     if (href) { left.appendChild(document.createTextNode(' · ')); const l = el('a', 'link', 'Open link'); l.href = href; l.target = '_blank'; l.rel = 'noopener noreferrer'; left.appendChild(l); }
     m.appendChild(left);
-    if (b) m.appendChild(b);
+    const list = (Array.isArray(b) ? b : [b]).filter(Boolean);
+    if (list.length) { const r = el('div', 'meta-btns'); list.forEach(x => r.appendChild(x)); m.appendChild(r); }
     return m;
   }
-  function urgentCard(a) {
-    const c = el('div', 'item urgent'); c.id = 'a-' + a.id;
+  function urgentCard(a, old) {
+    const c = el('div', 'item urgent' + (old ? ' old' : '')); c.id = 'a-' + a.id;
     c.appendChild(el('p', 'title', a.title.includes('🚨') ? a.title : '🚨 ' + a.title));
     if (a.body) c.appendChild(el('p', 'body', a.body));
     if (a.items && a.items.length) { const ul = el('ul'); a.items.forEach(i => ul.appendChild(el('li', null, i))); c.appendChild(ul); }
-    c.appendChild(metaRow(a, actionBtn('✓ Mark done', 'done', a.id, 'done')));
+    c.appendChild(metaRow(a, [actionBtn('✓ Mark done', 'done', a.id, 'done'), actionBtn('Dismiss', '', a.id, 'dismissed')]));
     return c;
   }
-  function summaryCard(a, openFirst) {
-    const c = el('div', 'item'); c.id = 'a-' + a.id;
+  function summaryCard(a, openFirst, old) {
+    const c = el('div', 'item' + (old ? ' old' : '')); c.id = 'a-' + a.id;
     const d = el('details'); if (openFirst) d.open = true;
     const s = el('summary');
     s.appendChild(el('span', 'chev', '›'));
@@ -808,13 +831,24 @@
     c.appendChild(metaRow(a, actionBtn('Dismiss', '', a.id, 'dismissed')));
     return c;
   }
+  // An alert from before today's IST midnight is "old": it moves to the collapsed Older group and is not counted
+  // as urgent (header count + app badge). Dismiss / Mark done set the alert's status in IndexedDB (alerts store);
+  // alert history is per device and is not part of the sync-back queue.
+  const alertDay = a => L.istDate(a.ts || a.receivedAt || 0);
+  async function oldPendingAlerts() {
+    const today = L.istDate(nowMs());
+    return (await HQDB.getAll().catch(() => [])).filter(a => a.status === 'pending' && alertDay(a) < today);
+  }
   async function renderAlerts(flashId) {
+    const today = L.istDate(nowMs());
     const all = (await HQDB.getAll().catch(() => [])).sort((x, y) => (y.ts || 0) - (x.ts || 0));
-    const urgent = all.filter(a => a.type === 'urgent' && a.status === 'pending');
+    const pending = all.filter(a => a.status === 'pending');
+    const fresh = pending.filter(a => alertDay(a) >= today), old = pending.filter(a => alertDay(a) < today);
+    const urgent = fresh.filter(a => a.type === 'urgent');
     if (navigator.setAppBadge) { try { urgent.length ? navigator.setAppBadge(urgent.length) : navigator.clearAppBadge(); } catch (e) { /* ignore */ } }
     if (!st.data && !st.noData) return; // locked: keep history off screen
-    const summaries = all.filter(a => a.type === 'summary' && a.status === 'pending');
-    const info = all.filter(a => a.type === 'info' && a.status === 'pending');
+    const summaries = fresh.filter(a => a.type === 'summary');
+    const info = fresh.filter(a => a.type === 'info');
     $('urgentList').replaceChildren(...urgent.map(urgentCard));
     $('urgentCount').textContent = String(urgent.length);
     $('urgentEmpty').classList.toggle('hidden', urgent.length > 0);
@@ -822,10 +856,23 @@
     $('summaryEmpty').classList.toggle('hidden', summaries.length > 0);
     $('infoList').replaceChildren(...info.map(a => summaryCard(a, false)));
     $('infoSection').classList.toggle('hidden', info.length === 0);
+    $('oldList').replaceChildren(...old.map(a => a.type === 'urgent' ? urgentCard(a, true) : summaryCard(a, false, true)));
+    $('oldCount').textContent = String(old.length);
+    $('oldSummary').textContent = `Show ${old.length} older alert${old.length === 1 ? '' : 's'} (before today)`;
+    $('oldSection').classList.toggle('hidden', old.length === 0);
     if (flashId) {
       const node = document.getElementById('a-' + flashId);
+      if (node && node.closest('#oldDetails')) $('oldDetails').open = true;
       if (node) { node.classList.add('flash'); const det = node.querySelector('details'); if (det) det.open = true; node.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
     }
+  }
+  async function dismissAllOld() {
+    const old = await oldPendingAlerts();
+    if (!old.length) { renderAlerts(); return; }
+    if (!confirm(`Dismiss ${old.length} alert${old.length === 1 ? '' : 's'} from before today?`)) return;
+    for (const a of old) await HQDB.setStatus(a.id, 'dismissed').catch(() => {});
+    toast(`Dismissed ${old.length} old alert${old.length === 1 ? '' : 's'}`);
+    renderAlerts();
   }
   async function clearOld() {
     if (!confirm('Remove done/dismissed alerts and anything older than 14 days? Pending urgent items are kept.')) return;
@@ -1001,6 +1048,7 @@
     $('testBtn').addEventListener('click', testPush);
     $('clearBtn').addEventListener('click', clearOld);
     $('clearBtn2').addEventListener('click', clearOld);
+    $('dismissOldBtn').addEventListener('click', dismissAllOld);
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('message', ev => {
         const d = ev.data || {};

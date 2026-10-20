@@ -322,3 +322,12 @@ label.todo-title { cursor: pointer; }
 .todo .todo-warn { margin: 0 0 8px; }
 .todo-list + .more-rows, .todo-group .more-rows { margin-top: 8px; }
 @media (max-width: 640px) { .todo-head .muted { flex-basis: 100%; } }
+/* v16: collapsed Google lists, upcoming hint, dismiss */
+details.todo-fold > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; min-height: 28px; list-style: none; }
+details.todo-fold > summary::-webkit-details-marker { display: none; }
+details.todo-fold > summary .chev { transition: transform .15s; }
+details.todo-fold[open] > summary .chev { transform: rotate(90deg); }
+details.todo-fold[open] > summary { margin-bottom: 6px; }
+.todo-ro { margin: 0 0 8px; }
+.todo-upcoming { margin: 8px 0 0; overflow-wrap: anywhere; }
+.todo-right .btn.small { padding: 3px 9px; font-size: .78rem; }

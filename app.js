@@ -7,7 +7,7 @@
   const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   let reg = null;
   // Version of this page's code; must equal CACHE in sw.js (bump both together). A different live sw.js = new code.
-  const APP_VERSION = 'life-hq-v15';
+  const APP_VERSION = 'life-hq-v16';
 
   // In-memory only. Plaintext data is never written to storage.
   const st = { env: null, device: null, data: null, overrides: {}, flashId: null, noData: false, lastSync: 0, offline: false, lastCheck: 0 };
@@ -179,6 +179,8 @@
     if (kind === 'card' || kind === 'bill') { const m = find((d.money || {})[kind === 'card' ? 'cards' : 'bills']); return !m || (m.status || 'unpaid') === v.status; }
     if (kind === 'notice') { const n = find((d.notices || {}).items); return !n || (n.status === 'done' ? 'done' : 'open') === v.status; }
     if (kind === 'todo') { const t = find((d.todos || {}).items); return !t || !!t.done === !!v.done; }
+    if (kind === 'tododis') { const t = find((d.todos || {}).items); return !t || !!t.dismissed === !!v.dismissed; }
+    if (kind === 'noticedis') { const n = find((d.notices || {}).items); return !n || (n.status === 'dismissed') === !!v.dismissed; }
     if (kind === 'note') {
       // Applied = the box has the note (add) or a tombstone for it (add or delete): a delete is never cleared before it lands.
       const notes = d.notes || {}, gone = (notes.deleted || []).includes(id);
@@ -217,6 +219,8 @@
       else if (kind === 'card' || kind === 'bill') change = { type: kind + '.status', id, status: v.status, date: v.date, at };
       else if (kind === 'notice') change = { type: 'notice.status', id, status: v.status, date: v.date, at };
       else if (kind === 'todo') change = { type: v.done ? 'todo.done' : 'todo.undone', id, at };
+      else if (kind === 'tododis') change = { type: v.dismissed ? 'todo.dismiss' : 'todo.restore', id, at };
+      else if (kind === 'noticedis') change = { type: v.dismissed ? 'notice.dismiss' : 'notice.restore', id, at };
       else if (kind === 'note') change = v.op === 'delete' ? { type: 'note.delete', id, at } : v.op === 'edit' ? { type: 'note.edit', id, text: v.text, at } : { type: 'note.add', id, text: v.text, createdAt: v.createdAt, at };
       if (change) out.push({ key: k, v, change });
     }
@@ -590,14 +594,18 @@
   const OPEN_KEY = 'lhqOpen';
   let openSet = null;
   function getOpen() { if (!openSet) { try { openSet = new Set(JSON.parse(sessionStorage.getItem(OPEN_KEY) || '[]')); } catch (e) { openSet = new Set(); } } return openSet; }
-  function remember(det, key, defOpen) {
-    const set = getOpen();
+  // persist: keep the state across sessions in localStorage (v16: to-do lists), else sessionStorage for this session.
+  const OPEN_KEY_LOCAL = 'lhqOpenLocal';
+  let openLocal = null;
+  function getOpenLocal() { if (!openLocal) { try { openLocal = new Set(JSON.parse(localStorage.getItem(OPEN_KEY_LOCAL) || '[]')); } catch (e) { openLocal = new Set(); } } return openLocal; }
+  function remember(det, key, defOpen, persist) {
+    const set = persist ? getOpenLocal() : getOpen();
     det.open = set.has(key) ? true : set.has('!' + key) ? false : !!defOpen;
     det.dataset.key = key;
     det.addEventListener('toggle', () => {
       set.delete(key); set.delete('!' + key);
       if (det.open !== !!defOpen) set.add(det.open ? key : '!' + key);
-      try { sessionStorage.setItem(OPEN_KEY, JSON.stringify([...set].slice(-200))); } catch (e) { /* ignore */ }
+      try { (persist ? localStorage : sessionStorage).setItem(persist ? OPEN_KEY_LOCAL : OPEN_KEY, JSON.stringify([...set].slice(-200))); } catch (e) { /* ignore */ }
     });
     return det;
   }
@@ -737,6 +745,15 @@
     else await setLocal(key, { done: checked });
     toast(checked ? 'Marked done · syncing' : 'Reopened · syncing');
   }
+  // v16: Dismiss / Restore (email to-dos: tododis:<id>; email notices: noticedis:<id>). Optimistic; back to the
+  // published state before anything was sent just drops the tap.
+  async function setDismiss(kind, id, base, dismissed, label) {
+    const key = kind + ':' + id;
+    if (dismissed === base && !sync.sent[key]) await delLocal(key); else await setLocal(key, { dismissed });
+    toast((dismissed ? 'Dismissed' : 'Restored') + (label ? ': ' + label.slice(0, 40) : '') + ' · syncing');
+  }
+  const todoBaseDismissed = id => !!((((st.data || {}).todos || {}).items || []).find(x => x && x.id === id) || {}).dismissed;
+  const noticeBaseDismissed = id => (((((st.data || {}).notices || {}).items || []).find(x => x && x.id === id)) || {}).status === 'dismissed';
   // Row: [tick or dot] [title + small meta/notes] [due pill, sync pill, link]
   let todoSeq = 0;
   function todoLi(t, opts) {
@@ -757,8 +774,13 @@
     const r = el('div', 'todo-right');
     if (!t.done && t.due) r.appendChild(pill(dueTxt(t), t.overdue ? 'red' : t.daysLeft <= 1 ? 'amber' : 'blue'));
     if (t.doneLocally) r.appendChild(pill(sync.sent['todo:' + t.id] ? 'sent' : 'queued', sync.sent['todo:' + t.id] ? 'blue' : 'amber'));
+    else if (t.dismissedLocally) r.appendChild(pill(sync.sent['tododis:' + t.id] ? 'sent' : 'queued', sync.sent['tododis:' + t.id] ? 'blue' : 'amber'));
     const a = extLink('↗', t.link, 'cal-link');
     if (a) { const gt = t.source === 'google-tasks'; a.setAttribute('aria-label', gt ? 'Open in Google Tasks: ' + t.title : 'Open link: ' + t.title); a.title = gt ? 'Open in Google Tasks' : 'Open'; r.appendChild(a); }
+    if (opts && opts.dismiss && t.tickable) {
+      const b = btn(t.dismissed ? 'Restore' : 'Dismiss', 'ghost small', () => setDismiss('tododis', t.id, todoBaseDismissed(t.id), !t.dismissed, t.title));
+      b.setAttribute('aria-label', (t.dismissed ? 'Restore: ' : 'Dismiss: ') + t.title); r.appendChild(b);
+    }
     if (r.childNodes.length) x.appendChild(r);
     return x;
   }
@@ -766,13 +788,13 @@
   function renderTodos(today) {
     const v = L.todoView(st.data, st.overrides, today), items = v.today;
     const box = $('todoBox');
-    const warn = reconnectNote(v, true);
-    if (!items.length && !warn) { box.replaceChildren(); box.classList.add('hidden'); return; }
+    const warn = reconnectNote(v, true), up = v.upcoming || [];
+    if (!items.length && !warn && !up.length) { box.replaceChildren(); box.classList.add('hidden'); return; }
     box.classList.remove('hidden');
     const c = el('div', 'card-lite todo');
     const head = el('div', 'todo-head');
     const od = items.filter(t => t.overdue).length;
-    head.appendChild(el('p', 'block-title', items.length ? `✅ To-do · ${items.length - od ? (items.length - od) + ' due today' : ''}${od && items.length - od ? ' · ' : ''}${od ? od + ' overdue' : ''}` : '✅ To-do'));
+    head.appendChild(el('p', 'block-title', items.length ? `✅ To-do · ${items.length - od ? (items.length - od) + ' due today' : ''}${od && items.length - od ? ' · ' : ''}${od ? od + ' overdue' : ''}` : '✅ To-do · nothing due today'));
     const go = el('button', 'btn small ghost', 'All to-dos ›'); go.type = 'button';
     go.addEventListener('click', () => scrollToSection('s-todos', true));
     head.appendChild(go); c.appendChild(head);
@@ -788,6 +810,12 @@
       for (const t of items.slice(shown)) ul2.appendChild(todoLi(t, { showList: true, compact: true }));
       det.append(s, ul2); c.appendChild(det);
     }
+    // Coming up in the next few days (one muted line, like the calendar's "more by" hint).
+    if (up.length) {
+      const days = L.settingsOf(st.data).todoUpcomingDays;
+      const names = up.slice(0, 3).map(t => `${t.title} (${t.daysLeft === 1 ? 'tomorrow' : L.fmtDate(t.due).split(' ')[0]})`).join(' · ');
+      c.appendChild(el('p', 'todo-upcoming muted small', `Upcoming in ${days} days: ${names}${up.length > 3 ? ` · +${up.length - 3} more` : ''}`));
+    }
     box.replaceChildren(c);
   }
   // To-do section: one card per group (Bills & dues from email first, then each Google Tasks list). Long lists show
@@ -798,29 +826,40 @@
     const out = [];
     const warn = reconnectNote(v); if (warn) out.push(warn);
     for (const g of v.groups) {
-      const c = el('div', 'card-lite todo-group');
-      const head = el('div', 'todo-head');
-      head.append(el('p', 'block-title', `${g.source === 'email' ? '📧' : '🗂️'} ${g.title} · ${g.open.length ? g.open.length + ' open' : 'nothing open'}`),
-        el('span', 'muted small', g.source === 'email' ? 'from email · tick when done' : 'Google Tasks · read-only'));
-      c.appendChild(head);
+      // v16: Bills & dues (email) and the primary Google list ('Tasks') are open; other lists are one collapsed row
+      // (name + open count) that opens on tap; the open/closed state is kept on this device.
+      const collapsible = g.source === 'google-tasks' && !g.primary;
+      const c = collapsible ? remember(el('details', 'card-lite todo-group todo-fold'), 'todo-list:' + g.key, false, true) : el('div', 'card-lite todo-group');
+      const titleTxt = `${g.source === 'email' ? '📧' : '🗂️'} ${g.title} · ${g.open.length ? g.open.length + ' open' : 'nothing open'}`;
+      if (collapsible) {
+        const s = el('summary'); s.append(el('span', 'block-title', titleTxt), el('span', 'chev', '›'));
+        c.appendChild(s);
+      } else {
+        const head = el('div', 'todo-head');
+        head.append(el('p', 'block-title', titleTxt), el('span', 'muted small', g.source === 'email' ? 'from email · tick when done' : 'Google Tasks · read-only'));
+        c.appendChild(head);
+      }
+      const body = collapsible ? el('div', 'todo-fold-body') : c;
+      if (collapsible) { body.appendChild(el('p', 'muted small todo-ro', 'Google Tasks · read-only')); c.appendChild(body); }
+      const rowOpts = { dismiss: g.source === 'email' };
       if (g.open.length) {
         const ul = el('ul', 'todo-list');
-        // Never cut between a parent and its subtasks' first row: fold only when it hides 2 or more.
         const shown = g.open.length > TODO_SHOW + 1 ? TODO_SHOW : g.open.length;
-        for (const t of g.open.slice(0, shown)) ul.appendChild(todoLi(t));
-        c.appendChild(ul);
+        for (const t of g.open.slice(0, shown)) ul.appendChild(todoLi(t, rowOpts));
+        body.appendChild(ul);
         if (g.open.length > shown) {
           const det = remember(el('details', 'more-rows'), 'todo-more:' + g.key);
           const s = el('summary'); s.append(el('span', null, `${g.open.length - shown} more`), el('span', 'chev', '›'));
-          const ul2 = el('ul', 'todo-list'); for (const t of g.open.slice(shown)) ul2.appendChild(todoLi(t));
-          det.append(s, ul2); c.appendChild(det);
+          const ul2 = el('ul', 'todo-list'); for (const t of g.open.slice(shown)) ul2.appendChild(todoLi(t, rowOpts));
+          det.append(s, ul2); body.appendChild(det);
         }
       }
-      if (g.done.length) {
-        const det = remember(el('details', 'more-rows'), 'todo-done:' + g.key);
-        const s = el('summary'); s.append(el('span', 'muted', `Done (${g.done.length})`), el('span', 'chev', '›'));
-        const ul2 = el('ul', 'todo-list'); for (const t of g.done) ul2.appendChild(todoLi(t, { compact: true }));
-        det.append(s, ul2); c.appendChild(det);
+      for (const [list, label, key, opts] of [[g.done, 'Done', 'todo-done:', { compact: true }], [g.dismissed || [], 'Dismissed', 'todo-dis:', { compact: true, dismiss: true }]]) {
+        if (!list.length) continue;
+        const det = remember(el('details', 'more-rows'), key + g.key);
+        const s = el('summary'); s.append(el('span', 'muted', `${label} (${list.length})`), el('span', 'chev', '›'));
+        const ul2 = el('ul', 'todo-list'); for (const t of list) ul2.appendChild(todoLi(t, opts));
+        det.append(s, ul2); body.appendChild(det);
       }
       out.push(c);
     }
@@ -995,8 +1034,11 @@
     const sub = [n.summary || null, n.dueDate ? `${n.dueLabel || 'Due'} ${L.fmtDate(n.dueDate)}${open ? ' (' + noticeWhen(n) + ')' : ''}` : null];
     const c = row(!open ? 'past' : n.overdue || n.sev === 'urgent' ? 'urgent' : n.sev === 'warn' ? 'warn' : '', `${n.icon || '📬'} ${n.title}`, sub,
       [pill(!open ? 'done' : n.overdue ? 'overdue' : n.pill || (n.sev === 'info' ? 'info' : 'to do'), !open ? 'green' : n.overdue || n.sev === 'urgent' ? 'red' : n.sev === 'warn' ? 'amber' : 'blue'),
-       n.doneLocally ? btn('Undo', 'ghost', () => delLocal('notice:' + n.id))
-         : open ? btn('Done ✓', 'done', () => setLocal('notice:' + n.id, { status: 'done', date: today })) : null]);
+       n.dismissed ? btn('Restore', 'ghost', () => setDismiss('noticedis', n.id, noticeBaseDismissed(n.id), false, n.title))
+         : n.doneLocally ? btn('Undo', 'ghost', () => delLocal('notice:' + n.id))
+         : open ? btn('Done ✓', 'done', () => setLocal('notice:' + n.id, { status: 'done', date: today })) : null,
+       open ? btn('Dismiss', 'ghost', () => setDismiss('noticedis', n.id, noticeBaseDismissed(n.id), true, n.title)) : null,
+       n.dismissedLocally ? pill(sync.sent['noticedis:' + n.id] ? 'sent' : 'queued', sync.sent['noticedis:' + n.id] ? 'blue' : 'amber') : null]);
     const more = moreDetails(n.details, 'notice:' + n.id); if (more) c.appendChild(more);
     return c;
   }
@@ -1004,12 +1046,13 @@
     const items = L.noticeItems(st.data, st.overrides, today);
     const box = $('noticeList');
     $('noticeHead').classList.toggle('hidden', !items.length);
-    const open = items.filter(n => n.status === 'open'), done = items.filter(n => n.status !== 'open');
+    const open = items.filter(n => n.status === 'open'), done = items.filter(n => n.status !== 'open' && !n.dismissed), dis = items.filter(n => n.dismissed);
     const out = open.map(n => noticeRow(n, today));
-    if (done.length) {
-      const det = remember(el('details', 'old-group'), 'notices-done');
-      const s = el('summary'); s.append(el('span', 'muted small', `Done (${done.length})`), el('span', 'chev', '›'));
-      const l = el('div', 'list'); done.forEach(n => l.appendChild(noticeRow(n, today)));
+    for (const [list, label, key] of [[done, 'Done', 'notices-done'], [dis, 'Dismissed', 'notices-dismissed']]) {
+      if (!list.length) continue;
+      const det = remember(el('details', 'old-group'), key);
+      const s = el('summary'); s.append(el('span', 'muted small', `${label} (${list.length})`), el('span', 'chev', '›'));
+      const l = el('div', 'list'); list.forEach(n => l.appendChild(noticeRow(n, today)));
       det.append(s, l); out.push(det);
     }
     box.replaceChildren(...out);
@@ -1180,6 +1223,8 @@
     if (c.type === 'maintenance.done') { const t = find(((d.maintenance || {}).appliances || []).flatMap(a => a.tasks || [])); return `Done: ${t.name || c.id}`; }
     if (c.type === 'charging.charged') return `Charged: ${find((d.charging || {}).devices).name || c.id}`;
     if (c.type === 'notice.status') return `${c.status === 'done' ? 'Done' : 'Reopened'}: ${find((d.notices || {}).items).title || c.id}`;
+    if (c.type === 'todo.dismiss' || c.type === 'todo.restore') return `${c.type === 'todo.dismiss' ? 'Dismiss' : 'Restore'}: ${find((d.todos || {}).items).title || c.id}`;
+    if (c.type === 'notice.dismiss' || c.type === 'notice.restore') return `${c.type === 'notice.dismiss' ? 'Dismiss' : 'Restore'}: ${find((d.notices || {}).items).title || c.id}`;
     if (c.type === 'todo.done' || c.type === 'todo.undone') return `${c.type === 'todo.done' ? 'Done' : 'Reopened'}: ${find((d.todos || {}).items).title || c.id}`;
     if (c.type === 'note.add') return 'Note: ' + (String(c.text || '').length > 40 ? String(c.text).slice(0, 40) + '…' : c.text);
     if (c.type === 'note.edit') return 'Edit note: ' + (String(c.text || '').length > 40 ? String(c.text).slice(0, 40) + '…' : c.text);

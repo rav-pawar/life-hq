@@ -242,16 +242,17 @@
   }
 
   // ---- To-dos (v15): Google Tasks (source 'google-tasks', READ-ONLY, filled by tools/gtasks.js) + Life HQ's own
-  // to-dos from email (source 'email', tickable: todo:<id> taps sync as todo.done / todo.undone, data only) ----
+  // to-dos from email (source 'email') and the daily health plan (source 'health', v18), tickable: todo:<id> taps
+  // sync as todo.done / todo.undone, data only ----
   const TODO_ID_RE = /^todo-[a-z0-9][a-z0-9-]{2,80}$/;
   const EMAIL_DONE_DAYS = 14;   // done email to-dos stay visible (folded) this long after doneOn
-  const todoTickable = t => !!t && t.source === 'email' && TODO_ID_RE.test(String(t.id || ''));
-  // Applies this device's pending ticks (email to-dos only) and adds daysLeft / overdue / tickable / doneLocally.
+  const todoTickable = t => !!t && (t.source === 'email' || t.source === 'health') && TODO_ID_RE.test(String(t.id || ''));
+  // Applies this device's pending ticks (email / health to-dos) and adds daysLeft / overdue / tickable / doneLocally.
   function todoAll(data, overrides, today) {
     return ((((data || {}).todos) || {}).items || []).filter(t => t && t.id && t.title).map(t => {
       const tick = todoTickable(t), v = tick ? (overrides || {})['todo:' + t.id] : null, vd = tick ? (overrides || {})['tododis:' + t.id] : null;
       const done = v && typeof v.done === 'boolean' ? v.done : !!t.done;
-      const dismissed = vd && typeof vd.dismissed === 'boolean' ? vd.dismissed : tick && !!t.dismissed;   // v16: email to-dos only
+      const dismissed = vd && typeof vd.dismissed === 'boolean' ? vd.dismissed : tick && !!t.dismissed;   // v16: email / health to-dos
       const daysLeft = isYMD(t.due) ? daysBetween(today, t.due) : null;
       return Object.assign({}, t, { done, dismissed, tickable: tick, doneLocally: !!v && v.done !== !!t.done, dismissedLocally: !!vd && vd.dismissed !== !!t.dismissed,
         daysLeft, overdue: !done && !dismissed && daysLeft != null && daysLeft < 0 });
@@ -301,6 +302,36 @@
     const upcoming = all.filter(t => inToday(t) && t.daysLeft > 0 && t.daysLeft <= settingsOf(data).todoUpcomingDays).sort(sortDue);
     return { today: todayList, upcoming, groups, openCount: all.filter(t => !t.done && !t.dismissed).length,
       authExpired: !!todos.authExpired, authExpiredAt: todos.authExpiredAt || null, fetchedAt: todos.fetchedAt || null };
+  }
+
+  // ---- Health plan (v18): daily items with source 'health'. They never enter the normal due/overdue to-do list,
+  // Today only shows the ones due exactly today, and the To-do tab groups all of them by day (past days included).
+  const healthTime = t => { const m = hhmmToMin(t && t.time); return m == null ? 24 * 60 : m; };
+  const healthSort = (a, b) => healthTime(a) - healthTime(b) || String(a.title || '').localeCompare(String(b.title || ''));
+  const healthAll = (data, overrides, today) => todoAll(data, overrides, today).filter(t => t.source === 'health');
+  // Today's health items only (never overdue ones), open + done, dismissed hidden. Sorted by time, then title.
+  function healthToday(data, todayISO, overrides) {
+    if (!isYMD(todayISO)) return [];
+    return healthAll(data, overrides || {}, todayISO).filter(t => !t.dismissed && t.due === todayISO).sort(healthSort);
+  }
+  // All health items grouped by due date (ascending). Each day: { date, theme, items, dismissed, total, done, open }.
+  // `items` are the non-dismissed ones (open + done); `done`/`total` power the "x/y done" row.
+  function healthByDay(data, overrides, todayISO) {
+    const today = isYMD(todayISO) ? todayISO : istDate(Date.now());
+    const days = new Map();
+    for (const t of healthAll(data, overrides || {}, today)) {
+      if (!isYMD(t.due)) continue;
+      let g = days.get(t.due);
+      if (!g) { g = { date: t.due, theme: '', items: [], dismissed: [], total: 0, done: 0, open: 0 }; days.set(t.due, g); }
+      if (t.dismissed) g.dismissed.push(t); else g.items.push(t);
+    }
+    return [...days.values()].sort((a, b) => a.date.localeCompare(b.date)).map(g => {
+      g.items.sort(healthSort); g.dismissed.sort(healthSort);
+      const themed = g.items.find(t => t.theme) || g.dismissed.find(t => t.theme);
+      g.theme = themed ? String(themed.theme) : '';
+      g.total = g.items.length; g.done = g.items.filter(t => t.done).length; g.open = g.total - g.done;
+      return g;
+    });
   }
 
   // ---- Notes to self (synced through the inbox as note.add / note.delete) ----
@@ -625,6 +656,7 @@
       }
     }
     // v16: dated Google tasks of the primary list ('Tasks') push once on their due date (generic, sanitized text).
+    // v18: health-plan items never enter todoView.today, so they are never pushed by this check.
     if (nowMin >= hhmmToMin(s.dailyAlertTime)) {
       for (const t of todoView(data, {}, today).today) {
         if (t.source !== 'google-tasks' || t.daysLeft !== 0) continue;
@@ -690,7 +722,7 @@
 
   g.LifeLogic = { istDate, istMinutes, istWeekday, addDays, daysBetween, weekdayOf, hhmmToMin, fmtTime, fmtDate, relDays, isYMD,
     settingsOf, nextMaintenanceSaturday, isMaintenanceSaturday, maintenanceTasks, maintenanceWeekend, maintenanceOverview, applianceIcon, moneyItems,
-    noticeItems, calendarEvents, todoItems, todoView, todoTickable, TODO_ID_RE, noteItems, cleanNoteText, NOTE_MAX, NOTE_ID_RE, wikiSanitize, wikiPacked, wikiHref, wikiSvgOk, ideaItems, cleanIdeaTitle, cleanIdeaDetails, IDEA_ID_RE, IDEA_STATUSES, IDEA_STATUS_LABEL, IDEA_PRIORITIES, IDEA_TITLE_MAX, IDEA_DETAILS_MAX, dedupeLead, schoolDay, holidayEntry, holidayDates, noSchoolReason, nextSchoolDay,
+    noticeItems, calendarEvents, todoItems, todoView, todoTickable, TODO_ID_RE, healthToday, healthByDay, noteItems, cleanNoteText, NOTE_MAX, NOTE_ID_RE, wikiSanitize, wikiPacked, wikiHref, wikiSvgOk, ideaItems, cleanIdeaTitle, cleanIdeaDetails, IDEA_ID_RE, IDEA_STATUSES, IDEA_STATUS_LABEL, IDEA_PRIORITIES, IDEA_TITLE_MAX, IDEA_DETAILS_MAX, dedupeLead, schoolDay, holidayEntry, holidayDates, noSchoolReason, nextSchoolDay,
     chargingDevices, supplyItems, festivalDayInfo, festivalTriviaToday, activeFestivals, upcomingFestivals,
     todayItems, dueAlerts, noticePushTitle, sensitiveReason, pushSafeText, schoolRunPush };
   if (typeof module === 'object' && module.exports) module.exports = g.LifeLogic;

@@ -7,7 +7,7 @@
   const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   let reg = null;
   // Version of this page's code; must equal CACHE in sw.js (bump both together). A different live sw.js = new code.
-  const APP_VERSION = 'life-hq-v17';
+  const APP_VERSION = 'life-hq-v18';
 
   // In-memory only. Plaintext data is never written to storage.
   const st = { env: null, device: null, data: null, overrides: {}, flashId: null, noData: false, lastSync: 0, offline: false, lastCheck: 0 };
@@ -95,7 +95,7 @@
     st.data = null;
     $('dash').classList.add('hidden');
     $('tabs').classList.add('hidden');
-    for (const id of ['todayList', 'calendarBox', 'todoBox', 'todoSection', 'notesList', 'ideasList', 'wikiBox', 'moneyList', 'noticeList', 'familyList', 'chargingList', 'weekendBox', 'homeList', 'suppliesList', 'urgentList', 'summaryList', 'infoList']) $(id).replaceChildren();
+    for (const id of ['todayList', 'calendarBox', 'todoBox', 'healthBox', 'todoSection', 'notesList', 'ideasList', 'wikiBox', 'moneyList', 'noticeList', 'familyList', 'chargingList', 'weekendBox', 'homeList', 'suppliesList', 'urgentList', 'summaryList', 'infoList']) $(id).replaceChildren();
     $('noteInput').value = '';
     $('ideaTitle').value = ''; $('ideaDetails').value = ''; ideaDraft.title = ideaDraft.details = '';
     $('syncJson').value = '';
@@ -686,6 +686,7 @@
     $('todayList').replaceChildren(...(list.length ? list : [el('p', 'empty', 'Nothing due today. 🎉')]));
     renderCalendar(now, today);
     renderTodos(today);
+    renderHealthToday(today);
   }
 
   const TODAY_SHOW = 5, TODO_SHOW = 5;
@@ -741,8 +742,9 @@
 
   // ---- To-dos (v15) ----
   // Google Tasks items are READ-ONLY here (shown with an "open in Google Tasks" link); Life HQ's own to-dos from email
-  // (source 'email': card dues, society maintenance, electricity …) have a tick that queues todo:<id> through the inbox
-  // (todo.done / todo.undone; the box only updates its data, never Google). Optimistic like notes.
+  // (source 'email': card dues, society maintenance, electricity …) and the daily health plan (source 'health', v18)
+  // have a tick that queues todo:<id> through the inbox (todo.done / todo.undone; the box only updates its data, never
+  // Google). Optimistic like notes.
   const dueTxt = t => t.overdue ? (t.daysLeft === -1 ? 'overdue · yesterday' : `overdue · ${-t.daysLeft} days`) : t.daysLeft === 0 ? 'today' : t.daysLeft === 1 ? 'tomorrow' : L.fmtDate(t.due);
   function reconnectNote(v, short) {
     if (!v.authExpired) return null;
@@ -782,11 +784,13 @@
       x.appendChild(cb);
     } else { const d = el('span', 'todo-dot', t.done ? '✓' : t.sub ? '↳' : '○'); d.setAttribute('aria-hidden', 'true'); x.appendChild(d); }
     mid.appendChild(title);
-    const meta = [opts && opts.showList ? (t.source === 'email' ? 'Bills & dues' : t.list || 'Google Tasks') : null, !(opts && opts.compact) ? t.notes : null].filter(Boolean);
+    const listName = t.source === 'email' ? 'Bills & dues' : t.source === 'health' ? 'Health plan' : t.list || 'Google Tasks';
+    const meta = [opts && opts.subtitle ? opts.subtitle : null, opts && opts.showList ? listName : null,
+      !(opts && opts.compact) ? t.notes : null].filter(Boolean);
     if (meta.length) mid.appendChild(el('span', 'todo-notes', meta.join(' · ')));
     x.appendChild(mid);
     const r = el('div', 'todo-right');
-    if (!t.done && t.due) r.appendChild(pill(dueTxt(t), t.overdue ? 'red' : t.daysLeft <= 1 ? 'amber' : 'blue'));
+    if (!t.done && t.due && !(opts && opts.hideDue)) r.appendChild(pill(dueTxt(t), t.overdue ? 'red' : t.daysLeft <= 1 ? 'amber' : 'blue'));
     if (t.doneLocally) r.appendChild(pill(sync.sent['todo:' + t.id] ? 'sent' : 'queued', sync.sent['todo:' + t.id] ? 'blue' : 'amber'));
     else if (t.dismissedLocally) r.appendChild(pill(sync.sent['tododis:' + t.id] ? 'sent' : 'queued', sync.sent['tododis:' + t.id] ? 'blue' : 'amber'));
     const a = extLink('↗', t.link, 'cal-link');
@@ -798,6 +802,70 @@
     if (r.childNodes.length) x.appendChild(r);
     return x;
   }
+  // v18: daily health plan (source 'health'). Today only ever shows today's items; the To-do tab groups every day.
+  function healthSubtitle(t) {
+    return [t.time && L.hhmmToMin(t.time) != null ? L.fmtTime(t.time) : null, t.theme].filter(Boolean).join(' · ');
+  }
+  function renderHealthToday(today) {
+    const box = $('healthBox');
+    const items = L.healthToday(st.data, today, st.overrides);
+    if (!items.length) { box.replaceChildren(); box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    const c = el('div', 'card-lite todo health-today');
+    const head = el('div', 'todo-head');
+    head.appendChild(el('p', 'block-title', '🩺 Health today'));
+    const go = el('button', 'btn small ghost', 'Health plan ›'); go.type = 'button';
+    go.addEventListener('click', () => scrollToSection('s-todos', true));
+    head.appendChild(go); c.appendChild(head);
+    const ul = el('ul', 'todo-list');
+    for (const t of items) ul.appendChild(todoLi(t, { compact: true, hideDue: true, subtitle: healthSubtitle(t) }));
+    c.appendChild(ul);
+    box.replaceChildren(c);
+  }
+  // To-do tab: "🩺 Health plan" (today, expanded) first, then "Rest of the plan" (one collapsed row per other day).
+  function renderHealthGroup(today, out) {
+    const days = L.healthByDay(st.data, st.overrides, today);
+    if (!days.length) return;
+    const items = L.healthToday(st.data, today, st.overrides);
+    const dismissed = days.flatMap(d => d.dismissed);
+    const c = el('div', 'card-lite todo-group health-group');
+    const head = el('div', 'todo-head');
+    head.append(el('p', 'block-title', '🩺 Health plan'), el('span', 'muted small', 'daily plan · tick when done'));
+    c.appendChild(head);
+    if (items.length) {
+      const ul = el('ul', 'todo-list');
+      for (const t of items) ul.appendChild(todoLi(t, { dismiss: true, hideDue: true, subtitle: healthSubtitle(t) }));
+      c.appendChild(ul);
+    } else c.appendChild(el('p', 'muted small todo-ro', 'Nothing planned today.'));
+    const others = days.filter(d => d.date !== today && d.items.length);
+    if (others.length) {
+      const rest = remember(el('details', 'more-rows health-rest'), 'health-rest', false, true);
+      const rs = el('summary'); rs.append(el('span', null, 'Rest of the plan'), el('span', 'chev', '›'));
+      const wrap = el('div');
+      for (const d of others) {
+        const det = remember(el('details', 'todo-fold health-day'), 'health-day:' + d.date, false, true);
+        const ds = el('summary');
+        const left = el('div', 'grow');
+        left.append(el('span', 'todo-title', L.fmtDate(d.date)), el('span', 'todo-notes', d.theme ? ' · ' + d.theme : ''));
+        ds.append(left, el('span', 'pill blue', `${d.done}/${d.total} done`), el('span', 'chev', '›'));
+        const body = el('div', 'todo-fold-body');
+        const ul = el('ul', 'todo-list');
+        for (const t of d.items) ul.appendChild(todoLi(t, { dismiss: true, hideDue: true, subtitle: healthSubtitle(t) }));
+        body.appendChild(ul);
+        det.append(ds, body); wrap.appendChild(det);
+      }
+      rest.append(rs, wrap); c.appendChild(rest);
+    }
+    if (dismissed.length) {
+      const det = remember(el('details', 'more-rows'), 'todo-dis:health');
+      const ds = el('summary'); ds.append(el('span', 'muted', `Dismissed (${dismissed.length})`), el('span', 'chev', '›'));
+      const ul = el('ul', 'todo-list');
+      for (const t of dismissed) ul.appendChild(todoLi(t, { compact: true, dismiss: true, hideDue: true, subtitle: healthSubtitle(t) }));
+      det.append(ds, ul); c.appendChild(det);
+    }
+    out.push(c);
+  }
+
   // Today: open to-dos due today or overdue (all sources); hidden when there are none (unless Google needs reconnecting).
   function renderTodos(today) {
     const v = L.todoView(st.data, st.overrides, today), items = v.today;
@@ -838,6 +906,7 @@
     const v = L.todoView(st.data, st.overrides, today);
     $('todoCount').textContent = String(v.openCount);
     const out = [];
+    renderHealthGroup(today, out);
     const warn = reconnectNote(v); if (warn) out.push(warn);
     for (const g of v.groups) {
       // v16: Bills & dues (email) and the primary Google list ('Tasks') are open; other lists are one collapsed row

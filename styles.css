@@ -337,6 +337,12 @@ details.todo-fold[open] > summary { margin-bottom: 6px; }
 .todo-upcoming { margin: 8px 0 0; overflow-wrap: anywhere; }
 .todo-right .btn.small { padding: 3px 9px; font-size: .78rem; }
 
+/* v18: daily health plan (Today block + To-do Health plan group) */
+.health-day > summary .grow { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 4px; }
+.health-day > summary .todo-title { flex: none; }
+.health-day > summary .todo-notes { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.health-day > summary .pill { flex: none; margin-left: auto; }
+
 /* ===== v17: Ideas tracker ===== */
 .idea-add { margin-bottom: 10px; }
 .idea-add > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; }

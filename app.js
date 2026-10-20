@@ -7,7 +7,7 @@
   const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   let reg = null;
   // Version of this page's code; must equal CACHE in sw.js (bump both together). A different live sw.js = new code.
-  const APP_VERSION = 'life-hq-v14';
+  const APP_VERSION = 'life-hq-v15';
 
   // In-memory only. Plaintext data is never written to storage.
   const st = { env: null, device: null, data: null, overrides: {}, flashId: null, noData: false, lastSync: 0, offline: false, lastCheck: 0 };
@@ -95,7 +95,7 @@
     st.data = null;
     $('dash').classList.add('hidden');
     $('tabs').classList.add('hidden');
-    for (const id of ['todayList', 'calendarBox', 'todoBox', 'notesList', 'moneyList', 'noticeList', 'familyList', 'chargingList', 'weekendBox', 'homeList', 'suppliesList', 'urgentList', 'summaryList', 'infoList']) $(id).replaceChildren();
+    for (const id of ['todayList', 'calendarBox', 'todoBox', 'todoSection', 'notesList', 'moneyList', 'noticeList', 'familyList', 'chargingList', 'weekendBox', 'homeList', 'suppliesList', 'urgentList', 'summaryList', 'infoList']) $(id).replaceChildren();
     $('noteInput').value = '';
     $('syncJson').value = '';
     $('lock').classList.remove('hidden');
@@ -178,6 +178,7 @@
     if (kind === 'supply') { const s = find((d.supplies || {}).items); return !s || ((s.status || 'ok') === v.status && (!v.lastBought || (!!s.lastBought && s.lastBought >= v.lastBought))); }
     if (kind === 'card' || kind === 'bill') { const m = find((d.money || {})[kind === 'card' ? 'cards' : 'bills']); return !m || (m.status || 'unpaid') === v.status; }
     if (kind === 'notice') { const n = find((d.notices || {}).items); return !n || (n.status === 'done' ? 'done' : 'open') === v.status; }
+    if (kind === 'todo') { const t = find((d.todos || {}).items); return !t || !!t.done === !!v.done; }
     if (kind === 'note') {
       // Applied = the box has the note (add) or a tombstone for it (add or delete): a delete is never cleared before it lands.
       const notes = d.notes || {}, gone = (notes.deleted || []).includes(id);
@@ -215,6 +216,7 @@
       else if (kind === 'supply') change = Object.assign({ type: 'supply.update', id, status: v.status, at }, v.lastBought ? { lastBought: v.lastBought } : {});
       else if (kind === 'card' || kind === 'bill') change = { type: kind + '.status', id, status: v.status, date: v.date, at };
       else if (kind === 'notice') change = { type: 'notice.status', id, status: v.status, date: v.date, at };
+      else if (kind === 'todo') change = { type: v.done ? 'todo.done' : 'todo.undone', id, at };
       else if (kind === 'note') change = v.op === 'delete' ? { type: 'note.delete', id, at } : v.op === 'edit' ? { type: 'note.edit', id, text: v.text, at } : { type: 'note.add', id, text: v.text, createdAt: v.createdAt, at };
       if (change) out.push({ key: k, v, change });
     }
@@ -715,35 +717,115 @@
     }
   }
 
-  // To-do: open items only; the whole block is hidden when there are none.
+  // ---- To-dos (v15) ----
+  // Google Tasks items are READ-ONLY here (shown with an "open in Google Tasks" link); Life HQ's own to-dos from email
+  // (source 'email': card dues, society maintenance, electricity …) have a tick that queues todo:<id> through the inbox
+  // (todo.done / todo.undone; the box only updates its data, never Google). Optimistic like notes.
+  const dueTxt = t => t.overdue ? (t.daysLeft === -1 ? 'overdue · yesterday' : `overdue · ${-t.daysLeft} days`) : t.daysLeft === 0 ? 'today' : t.daysLeft === 1 ? 'tomorrow' : L.fmtDate(t.due);
+  function reconnectNote(v, short) {
+    if (!v.authExpired) return null;
+    const since = v.authExpiredAt ? ` (since ${fmtIST(Date.parse(v.authExpiredAt))})` : '';
+    return el('p', 'todo-warn small', short ? '⚠️ Google Tasks needs re-connecting: showing the last synced list.'
+      : `⚠️ Google Tasks needs re-connecting${since}. Showing the last synced list; ask your assistant to reconnect it.`);
+  }
+  async function tickTodo(t, checked) {
+    const key = 'todo:' + t.id;
+    const item = ((st.data.todos || {}).items || []).find(x => x && x.id === t.id);
+    const base = !!(item && item.done);
+    // Back to the published state before anything left this device: just drop the tap. Already sent: send the reverse.
+    if (checked === base && !sync.sent[key]) await delLocal(key);
+    else await setLocal(key, { done: checked });
+    toast(checked ? 'Marked done · syncing' : 'Reopened · syncing');
+  }
+  // Row: [tick or dot] [title + small meta/notes] [due pill, sync pill, link]
+  let todoSeq = 0;
+  function todoLi(t, opts) {
+    const x = el('li', 'todo-item' + (t.done ? ' done' : '') + (t.sub ? ' sub' : ''));
+    const mid = el('div', 'todo-main');
+    const title = el(t.tickable ? 'label' : 'span', 'todo-title', t.title);
+    if (t.tickable) {
+      const cb = el('input', 'todo-cb'); cb.type = 'checkbox'; cb.checked = t.done; cb.id = 'tdc-' + (++todoSeq);
+      cb.setAttribute('aria-label', (t.done ? 'Reopen: ' : 'Mark done: ') + t.title);
+      cb.addEventListener('change', () => tickTodo(t, cb.checked));
+      title.htmlFor = cb.id;
+      x.appendChild(cb);
+    } else { const d = el('span', 'todo-dot', t.done ? '✓' : t.sub ? '↳' : '○'); d.setAttribute('aria-hidden', 'true'); x.appendChild(d); }
+    mid.appendChild(title);
+    const meta = [opts && opts.showList ? (t.source === 'email' ? 'Bills & dues' : t.list || 'Google Tasks') : null, !(opts && opts.compact) ? t.notes : null].filter(Boolean);
+    if (meta.length) mid.appendChild(el('span', 'todo-notes', meta.join(' · ')));
+    x.appendChild(mid);
+    const r = el('div', 'todo-right');
+    if (!t.done && t.due) r.appendChild(pill(dueTxt(t), t.overdue ? 'red' : t.daysLeft <= 1 ? 'amber' : 'blue'));
+    if (t.doneLocally) r.appendChild(pill(sync.sent['todo:' + t.id] ? 'sent' : 'queued', sync.sent['todo:' + t.id] ? 'blue' : 'amber'));
+    const a = extLink('↗', t.link, 'cal-link');
+    if (a) { const gt = t.source === 'google-tasks'; a.setAttribute('aria-label', gt ? 'Open in Google Tasks: ' + t.title : 'Open link: ' + t.title); a.title = gt ? 'Open in Google Tasks' : 'Open'; r.appendChild(a); }
+    if (r.childNodes.length) x.appendChild(r);
+    return x;
+  }
+  // Today: open to-dos due today or overdue (all sources); hidden when there are none (unless Google needs reconnecting).
   function renderTodos(today) {
-    const items = L.todoItems(st.data, today);
+    const v = L.todoView(st.data, st.overrides, today), items = v.today;
     const box = $('todoBox');
-    if (!items.length) { box.replaceChildren(); box.classList.add('hidden'); return; }
+    const warn = reconnectNote(v, true);
+    if (!items.length && !warn) { box.replaceChildren(); box.classList.add('hidden'); return; }
     box.classList.remove('hidden');
     const c = el('div', 'card-lite todo');
-    c.appendChild(el('p', 'block-title', `✅ To-do · ${items.length} open`));
+    const head = el('div', 'todo-head');
+    const od = items.filter(t => t.overdue).length;
+    head.appendChild(el('p', 'block-title', items.length ? `✅ To-do · ${items.length - od ? (items.length - od) + ' due today' : ''}${od && items.length - od ? ' · ' : ''}${od ? od + ' overdue' : ''}` : '✅ To-do'));
+    const go = el('button', 'btn small ghost', 'All to-dos ›'); go.type = 'button';
+    go.addEventListener('click', () => scrollToSection('s-todos', true));
+    head.appendChild(go); c.appendChild(head);
+    if (warn) c.appendChild(warn);
     const ul = el('ul', 'todo-list');
-    const li = t => {
-      const x = el('li');
-      x.appendChild(el('span', 'todo-title', t.title));
-      if (t.due) x.appendChild(pill(t.overdue ? 'overdue' : t.daysLeft === 0 ? 'today' : t.daysLeft === 1 ? 'tomorrow' : L.fmtDate(t.due), t.overdue ? 'red' : t.daysLeft <= 1 ? 'amber' : 'blue'));
-      const a = extLink('Open ↗', t.link); if (a) x.appendChild(a);
-      return x;
-    };
     const shown = items.length > TODO_SHOW + 1 ? TODO_SHOW : items.length;
-    for (const t of items.slice(0, shown)) ul.appendChild(li(t));
-    c.appendChild(ul);
+    for (const t of items.slice(0, shown)) ul.appendChild(todoLi(t, { showList: true, compact: true }));
+    if (items.length) c.appendChild(ul);
     if (items.length > shown) {
       const det = remember(el('details', 'more-rows'), 'todo-more');
       const s = el('summary'); s.append(el('span', null, `${items.length - shown} more`), el('span', 'chev', '›'));
       const ul2 = el('ul', 'todo-list');
-      for (const t of items.slice(shown, 50)) ul2.appendChild(li(t));
-      det.append(s, ul2);
-      if (items.length > 50) det.appendChild(el('p', 'muted small', `…and ${items.length - 50} more`));
-      c.appendChild(det);
+      for (const t of items.slice(shown)) ul2.appendChild(todoLi(t, { showList: true, compact: true }));
+      det.append(s, ul2); c.appendChild(det);
     }
     box.replaceChildren(c);
+  }
+  // To-do section: one card per group (Bills & dues from email first, then each Google Tasks list). Long lists show
+  // TODO_SHOW rows and fold the rest; recently done ones fold under "Done (n)".
+  function renderTodoSection(today) {
+    const v = L.todoView(st.data, st.overrides, today);
+    $('todoCount').textContent = String(v.openCount);
+    const out = [];
+    const warn = reconnectNote(v); if (warn) out.push(warn);
+    for (const g of v.groups) {
+      const c = el('div', 'card-lite todo-group');
+      const head = el('div', 'todo-head');
+      head.append(el('p', 'block-title', `${g.source === 'email' ? '📧' : '🗂️'} ${g.title} · ${g.open.length ? g.open.length + ' open' : 'nothing open'}`),
+        el('span', 'muted small', g.source === 'email' ? 'from email · tick when done' : 'Google Tasks · read-only'));
+      c.appendChild(head);
+      if (g.open.length) {
+        const ul = el('ul', 'todo-list');
+        // Never cut between a parent and its subtasks' first row: fold only when it hides 2 or more.
+        const shown = g.open.length > TODO_SHOW + 1 ? TODO_SHOW : g.open.length;
+        for (const t of g.open.slice(0, shown)) ul.appendChild(todoLi(t));
+        c.appendChild(ul);
+        if (g.open.length > shown) {
+          const det = remember(el('details', 'more-rows'), 'todo-more:' + g.key);
+          const s = el('summary'); s.append(el('span', null, `${g.open.length - shown} more`), el('span', 'chev', '›'));
+          const ul2 = el('ul', 'todo-list'); for (const t of g.open.slice(shown)) ul2.appendChild(todoLi(t));
+          det.append(s, ul2); c.appendChild(det);
+        }
+      }
+      if (g.done.length) {
+        const det = remember(el('details', 'more-rows'), 'todo-done:' + g.key);
+        const s = el('summary'); s.append(el('span', 'muted', `Done (${g.done.length})`), el('span', 'chev', '›'));
+        const ul2 = el('ul', 'todo-list'); for (const t of g.done) ul2.appendChild(todoLi(t, { compact: true }));
+        det.append(s, ul2); c.appendChild(det);
+      }
+      out.push(c);
+    }
+    if (!v.groups.length) out.push(el('p', 'empty', 'No to-dos yet.'));
+    $('todoSection').replaceChildren(...out);
   }
 
   // Notes to self: queued locally as note:<id> taps, synced through the inbox, published encrypted to every device.
@@ -1098,6 +1180,7 @@
     if (c.type === 'maintenance.done') { const t = find(((d.maintenance || {}).appliances || []).flatMap(a => a.tasks || [])); return `Done: ${t.name || c.id}`; }
     if (c.type === 'charging.charged') return `Charged: ${find((d.charging || {}).devices).name || c.id}`;
     if (c.type === 'notice.status') return `${c.status === 'done' ? 'Done' : 'Reopened'}: ${find((d.notices || {}).items).title || c.id}`;
+    if (c.type === 'todo.done' || c.type === 'todo.undone') return `${c.type === 'todo.done' ? 'Done' : 'Reopened'}: ${find((d.todos || {}).items).title || c.id}`;
     if (c.type === 'note.add') return 'Note: ' + (String(c.text || '').length > 40 ? String(c.text).slice(0, 40) + '…' : c.text);
     if (c.type === 'note.edit') return 'Edit note: ' + (String(c.text || '').length > 40 ? String(c.text).slice(0, 40) + '…' : c.text);
     if (c.type === 'note.delete') return 'Delete note: ' + ((find((d.notes || {}).items).text || c.id).slice(0, 40));
@@ -1130,12 +1213,12 @@
     await loadOverrides();
     if (st.data) {
       const now = nowMs(), today = L.istDate(now);
-      const parts = [() => renderToday(now, today), renderNotes, () => renderMoney(today), () => renderFamily(now, today), () => renderFestivals(today),
+      const parts = [() => renderToday(now, today), () => renderTodoSection(today), renderNotes, () => renderMoney(today), () => renderFamily(now, today), () => renderFestivals(today),
         () => renderCharging(now, today), () => renderHome(today), () => renderSupplies(today), renderSync];
       for (const p of parts) { try { p(); } catch (e) { console.error(e); banner('⚠️ Some data could not be shown: ' + e.message); } }
     }
     $('s-today').classList.toggle('hidden', !st.data);
-    for (const id of ['s-notes', 's-money', 's-family', 's-festivals', 's-charging', 's-home', 's-supplies', 's-sync']) $(id).classList.toggle('hidden', !st.data);
+    for (const id of ['s-todos', 's-notes', 's-money', 's-family', 's-festivals', 's-charging', 's-home', 's-supplies', 's-sync']) $(id).classList.toggle('hidden', !st.data);
     await renderAlerts();
     updateSyncInfo();
   }

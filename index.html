@@ -20,7 +20,7 @@
       <h1>Life HQ</h1>
     </a>
     <nav id="tabs" class="tabs hidden" aria-label="Sections">
-      <a href="#s-today">Today</a><a href="#s-notes">Notes</a><a href="#s-money">Money</a><a href="#s-family">Family</a><a href="#s-festivals">Festivals</a><a href="#s-charging">Charging</a><a href="#s-home">Home</a><a href="#s-supplies">Supplies</a><a href="#s-alerts">Alerts</a>
+      <a href="#s-today">Today</a><a href="#s-todos">To-do</a><a href="#s-notes">Notes</a><a href="#s-money">Money</a><a href="#s-family">Family</a><a href="#s-festivals">Festivals</a><a href="#s-charging">Charging</a><a href="#s-home">Home</a><a href="#s-supplies">Supplies</a><a href="#s-alerts">Alerts</a>
     </nav>
     <!-- Shown when new data or a new app version is ready; applied by itself after 10 s without interaction. -->
     <button id="updPill" class="upd-pill hidden" type="button" aria-live="polite">🔄 Update available · tap to refresh</button>
@@ -130,6 +130,10 @@
         <div id="todoBox" class="today-block hidden"></div>
       </section>
 
+      <section id="s-todos" class="sec">
+        <div class="section-head"><h2>✅ To-do</h2><span id="todoCount" class="pill">0</span></div>
+        <div id="todoSection" class="list"></div>
+      </section>
       <section id="s-notes" class="sec">
         <div class="section-head"><h2>📝 Notes to self</h2><span id="noteCount" class="pill">0</span></div>
         <div class="note-form">

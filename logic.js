@@ -236,12 +236,55 @@
       .sort((a, b) => a.date.localeCompare(b.date) || (a.allDay === b.allDay ? 0 : a.allDay ? -1 : 1) || String(a.start || '').localeCompare(String(b.start || '')));
   }
 
-  // ---- To-dos (generic; the source app is filled in by the morning routine) ----
-  function todoItems(data, today) {
-    return ((((data || {}).todos) || {}).items || []).filter(t => t && t.title && !t.done).map(t => {
+  // ---- To-dos (v15): Google Tasks (source 'google-tasks', READ-ONLY, filled by tools/gtasks.js) + Life HQ's own
+  // to-dos from email (source 'email', tickable: todo:<id> taps sync as todo.done / todo.undone, data only) ----
+  const TODO_ID_RE = /^todo-[a-z0-9][a-z0-9-]{2,80}$/;
+  const EMAIL_DONE_DAYS = 14;   // done email to-dos stay visible (folded) this long after doneOn
+  const todoTickable = t => !!t && t.source === 'email' && TODO_ID_RE.test(String(t.id || ''));
+  // Applies this device's pending ticks (email to-dos only) and adds daysLeft / overdue / tickable / doneLocally.
+  function todoAll(data, overrides, today) {
+    return ((((data || {}).todos) || {}).items || []).filter(t => t && t.id && t.title).map(t => {
+      const tick = todoTickable(t), v = tick ? (overrides || {})['todo:' + t.id] : null;
+      const done = v && typeof v.done === 'boolean' ? v.done : !!t.done;
       const daysLeft = isYMD(t.due) ? daysBetween(today, t.due) : null;
-      return Object.assign({}, t, { daysLeft, overdue: daysLeft != null && daysLeft < 0 });
-    }).sort((a, b) => String(a.due || '9999').localeCompare(String(b.due || '9999')) || String(a.title).localeCompare(String(b.title)));
+      return Object.assign({}, t, { done, tickable: tick, doneLocally: !!v && v.done !== !!t.done, daysLeft, overdue: !done && daysLeft != null && daysLeft < 0 });
+    });
+  }
+  const byDue = (a, b) => String(a.due || '9999').localeCompare(String(b.due || '9999'));
+  // Open items (all sources), due first. Accepts (data, today) too (v13 signature).
+  function todoItems(data, overrides, today) {
+    if (typeof overrides === 'string') { today = overrides; overrides = {}; }
+    return todoAll(data, overrides, today).filter(t => !t.done).sort((a, b) => byDue(a, b) || String(a.title).localeCompare(String(b.title)));
+  }
+  // Dashboard view: today = open items due today or overdue; groups = Life HQ (email) first, then each Google list in
+  // Google's order. In a group: open due-dated first (by date), then the rest in source order (Google position,
+  // subtasks after their parent); done = recently completed (Google: last ~2 days; email: doneOn within 14 days).
+  function todoView(data, overrides, today) {
+    const todos = (data || {}).todos || {};
+    const all = todoAll(data, overrides, today);
+    const idx = new Map(all.map((t, i) => [t.id, i]));
+    const groups = [];
+    const email = all.filter(t => t.source === 'email');
+    const recentDone = t => !t.doneOn || !isYMD(t.doneOn) || daysBetween(t.doneOn, today) <= EMAIL_DONE_DAYS;
+    const order = (a, b) => (a.due ? 0 : 1) - (b.due ? 0 : 1) || byDue(a, b) || idx.get(a.id) - idx.get(b.id);
+    if (email.length) groups.push({ key: 'email', title: 'Bills & dues', source: 'email', tickable: true,
+      open: email.filter(t => !t.done).sort(order), done: email.filter(t => t.done && recentDone(t)).sort((a, b) => String(b.doneOn || '').localeCompare(String(a.doneOn || ''))) });
+    const g = all.filter(t => t.source === 'google-tasks');
+    const lists = Array.isArray(todos.lists) && todos.lists.length ? todos.lists.filter(l => l && l.id)
+      : [...new Set(g.map(t => t.listId))].map(id => ({ id, title: (g.find(t => t.listId === id) || {}).list }));
+    for (const l of lists) {
+      const its = g.filter(t => t.listId === l.id);
+      // Subtasks follow their parent; a due-dated parent pulls its subtasks up with it.
+      const top = its.filter(t => !t.parent || !its.some(p => p.id === t.parent));
+      const kids = p => its.filter(t => t.parent === p.id);
+      const openTop = top.filter(t => !t.done).sort(order);
+      const open = openTop.flatMap(p => [p, ...kids(p).filter(k => !k.done).map(k => Object.assign({}, k, { sub: true }))]);
+      for (const t of its) if (!t.done && !open.some(o => o.id === t.id)) open.push(Object.assign({}, t, { sub: true })); // open child of a done parent
+      groups.push({ key: 'gt:' + l.id, title: l.title || 'Tasks', source: 'google-tasks', tickable: false, open, done: its.filter(t => t.done) });
+    }
+    const todayList = all.filter(t => !t.done && t.daysLeft != null && t.daysLeft <= 0).sort((a, b) => byDue(a, b) || String(a.title).localeCompare(String(b.title)));
+    return { today: todayList, groups, openCount: all.filter(t => !t.done).length,
+      authExpired: !!todos.authExpired, authExpiredAt: todos.authExpiredAt || null, fetchedAt: todos.fetchedAt || null };
   }
 
   // ---- Notes to self (synced through the inbox as note.add / note.delete) ----
@@ -470,7 +513,7 @@
 
   g.LifeLogic = { istDate, istMinutes, istWeekday, addDays, daysBetween, weekdayOf, hhmmToMin, fmtTime, fmtDate, relDays, isYMD,
     settingsOf, nextMaintenanceSaturday, isMaintenanceSaturday, maintenanceTasks, maintenanceWeekend, maintenanceOverview, applianceIcon, moneyItems,
-    noticeItems, calendarEvents, todoItems, noteItems, cleanNoteText, NOTE_MAX, NOTE_ID_RE, dedupeLead, schoolDay, holidayEntry, holidayDates, noSchoolReason, nextSchoolDay,
+    noticeItems, calendarEvents, todoItems, todoView, todoTickable, TODO_ID_RE, noteItems, cleanNoteText, NOTE_MAX, NOTE_ID_RE, dedupeLead, schoolDay, holidayEntry, holidayDates, noSchoolReason, nextSchoolDay,
     chargingDevices, supplyItems, festivalDayInfo, festivalTriviaToday, activeFestivals, upcomingFestivals,
     todayItems, dueAlerts, noticePushTitle, sensitiveReason };
   if (typeof module === 'object' && module.exports) module.exports = g.LifeLogic;

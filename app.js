@@ -7,7 +7,7 @@
   const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   let reg = null;
   // Version of this page's code; must equal CACHE in sw.js (bump both together). A different live sw.js = new code.
-  const APP_VERSION = 'life-hq-v18';
+  const APP_VERSION = 'life-hq-v19';
 
   // In-memory only. Plaintext data is never written to storage.
   const st = { env: null, device: null, data: null, overrides: {}, flashId: null, noData: false, lastSync: 0, offline: false, lastCheck: 0 };
@@ -804,7 +804,7 @@
   }
   // v18: daily health plan (source 'health'). Today only ever shows today's items; the To-do tab groups every day.
   function healthSubtitle(t) {
-    return [t.time && L.hhmmToMin(t.time) != null ? L.fmtTime(t.time) : null, t.theme].filter(Boolean).join(' · ');
+    return t.time && L.hhmmToMin(t.time) != null ? L.fmtTime(t.time) : '';
   }
   function renderHealthToday(today) {
     const box = $('healthBox');

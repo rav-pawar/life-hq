@@ -252,12 +252,17 @@ details.appl > summary .chev { float: none; flex: none; }
 @media (min-width: 641px) and (max-width: 1180px) {
   .topbar { gap: 8px; }
   .brand h1 { display: none; }
-  .tabs { gap: 4px; padding: 0 4px; }
-  .tabs a { padding: 6px 9px; font-size: .85rem; }
+  .tabs { gap: 3px; padding: 0 4px; }
+  .tabs a { padding: 6px 7px; font-size: .84rem; }   /* v17: 12 pills still fit from 900px */
 }
-@media (min-width: 900px) {
-  .tabs { -webkit-mask-image: none; mask-image: none; }   /* nothing to fade when everything fits */
-}
+/* v17: the pill row fades only on the side(s) that have more pills (classes set by app.js when it overflows). */
+.tabs { -webkit-mask-image: none; mask-image: none; }
+.tabs.fade-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.tabs.fade-l { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px);
+  mask-image: linear-gradient(to right, transparent, #000 28px); }
+.tabs.fade-l.fade-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
 /* Today: festival tip collapsed to a one-line teaser */
 details.fest-tip { padding: 10px 14px; }
 details.fest-tip > summary { display: flex; align-items: center; gap: 8px; min-height: 28px; border-radius: 8px; }
@@ -331,3 +336,90 @@ details.todo-fold[open] > summary { margin-bottom: 6px; }
 .todo-ro { margin: 0 0 8px; }
 .todo-upcoming { margin: 8px 0 0; overflow-wrap: anywhere; }
 .todo-right .btn.small { padding: 3px 9px; font-size: .78rem; }
+
+/* ===== v17: Ideas tracker ===== */
+.idea-add { margin-bottom: 10px; }
+.idea-add > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; }
+.idea-add > summary .title { margin: 0; color: #8fb6ff; }
+.idea-form, .idea-edit { display: grid; gap: 8px; margin-top: 10px; }
+.idea-edit { margin-top: 0; }
+.idea-input, .idea-text, .idea-select { font: inherit; font-size: 1rem; color: var(--text); background: var(--card2); border: 1px solid #3a4160;
+  border-radius: 10px; padding: 8px 10px; box-sizing: border-box; min-width: 0; }
+.idea-input, .idea-text { width: 100%; }
+.idea-text { resize: vertical; line-height: 1.4; min-height: 4.2em; }
+.idea-select { padding: 6px 8px; min-height: 36px; }
+.idea-input:focus-visible, .idea-text:focus-visible, .idea-select:focus-visible { outline: 2px solid #8fb6ff; outline-offset: 1px; }
+.idea-edit-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.idea-edit-bar .idea-select { margin-right: auto; }
+.idea-item { padding: 12px 14px; }
+.idea-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px 10px; flex-wrap: wrap; }
+.idea-title { margin: 0; overflow-wrap: anywhere; flex: 1 1 200px; min-width: 0; }
+.idea-pills { display: flex; gap: 6px; flex-wrap: wrap; flex: none; }
+.idea-pills .pill { font-size: .75rem; font-weight: 600; }
+.pill.idea-st { background: var(--card2); color: var(--text); border: 1px solid #343a4f; }
+.pill.idea-st.blue { background: #16305e; color: #9cc2ff; border-color: #2a4f90; }
+.pill.idea-st.amber { background: var(--amber-bg); color: #ffd27a; border-color: var(--amber-border); }
+.pill.idea-st.green { background: #12371f; color: #7ee2a8; border-color: #1f6a3c; }
+.pill.idea-st.muted-pill { color: var(--muted); }
+.pill.idea-pri { background: none; border: 1px solid #343a4f; color: var(--muted); }
+.pill.idea-pri.pri-high { color: #ff9a9a; border-color: var(--red-border); }
+.idea-details { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; color: #cfd3df; font-size: .93rem; }
+.idea-more > summary .idea-teaser { color: #cfd3df; font-size: .93rem; }
+.idea-more[open] > summary .idea-teaser { display: none; }
+.idea-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.idea-meta { margin: 0; }
+.idea-ctl { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.idea-closed .idea-title { color: var(--muted); }
+.idea-closed-group { margin-top: 6px; }
+
+/* ===== v17: Wiki ===== */
+.wiki { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; }
+.wiki > *, .wiki-body > * { min-width: 0; max-width: 100%; }
+.wiki-toc { padding: 12px 14px; }
+.wiki-toc > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; }
+.wiki-toc > summary .title { margin: 0; }
+.wiki-toc-list { margin: 8px 0 2px; padding-left: 1.6em; columns: 2 220px; column-gap: 24px; }
+.wiki-toc-list li { margin: 4px 0; break-inside: avoid; }
+.wiki-toc-list a { display: inline-block; padding: 3px 0; }
+details.wiki-sec { background: var(--card); border: 1px solid #262a38; border-radius: var(--radius); scroll-margin-top: calc(var(--header-total) + var(--gap)); }
+details.wiki-sec > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; min-height: 48px; border-radius: var(--radius); }
+details.wiki-sec > summary::after { content: none; display: none; }
+details.wiki-sec > summary .chev { float: none; flex: none; }
+details.wiki-sec > summary:focus-visible, .wiki-toc > summary:focus-visible { outline: 2px solid #8fb6ff; outline-offset: 2px; }
+.wiki-title { margin: 0; font-size: 1.02rem; }
+.wiki-body { padding: 0 14px 14px; line-height: 1.5; font-size: .95rem; overflow-wrap: anywhere; min-width: 0; }
+.wiki-body > :first-child { margin-top: 0; }
+.wiki-p { margin: 8px 0; }
+.wiki-h3, .wiki-h4 { margin: 16px 0 6px; font-size: .98rem; color: #cfd8ff; }
+.wiki-h4 { font-size: .93rem; }
+.wiki-list { margin: 6px 0; padding-left: 1.4em; }
+.wiki-list li { margin: 4px 0; }
+.wiki-quote { margin: 8px 0; padding: 6px 12px; border-left: 3px solid #3a4160; color: var(--muted); }
+.wiki-hr { border: 0; border-top: 1px solid #262a38; margin: 12px 0; }
+.wiki-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .86em; background: #0c0e14;
+  border: 1px solid #262a38; border-radius: 6px; padding: 1px 5px; overflow-wrap: anywhere; }
+.wiki-pre { margin: 8px 0; padding: 10px 12px; background: #0c0e14; border: 1px solid #262a38; border-radius: 10px; overflow-x: auto;
+  font-size: .82rem; line-height: 1.45; white-space: pre; }
+.wiki-table { overflow-x: auto; margin: 8px 0; border: 1px solid #262a38; border-radius: 10px; -webkit-overflow-scrolling: touch; }
+.wiki-table table { border-collapse: collapse; width: 100%; font-size: .86rem; }
+.wiki-table th, .wiki-table td { text-align: left; vertical-align: top; padding: 6px 10px; border-bottom: 1px solid #262a38; overflow-wrap: normal; word-break: normal; }
+.wiki-table th { background: var(--card2); font-weight: 600; white-space: nowrap; }
+.wiki-table tr:last-child td { border-bottom: 0; }
+.wiki-table td { min-width: 6em; }
+.wiki-table td:first-child { white-space: nowrap; min-width: 0; }
+.wiki-pre:focus-visible, .wiki-table:focus-visible, .wiki-fig-scroll:focus-visible { outline: 2px solid #8fb6ff; outline-offset: 2px; }
+.wiki-fig { margin: 10px 0; }
+.wiki-fig-scroll { overflow: auto; background: #1b1e28; border: 1px solid #262a38; border-radius: 10px; padding: 6px; -webkit-overflow-scrolling: touch; }
+.wiki-fig img { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.wiki-fig.zoom .wiki-fig-scroll { max-height: 75vh; }
+.wiki-fig.zoom img { max-width: none; }
+.wiki-fig figcaption { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+@media (max-width: 640px) {
+  .wiki-body { padding: 0 12px 12px; font-size: .93rem; }
+  .wiki-table table { font-size: .82rem; }
+  .idea-ctl { margin-left: 0; width: 100%; }
+  .idea-ctl .idea-select { flex: 1 1 auto; }
+}
+.wiki-zoom { flex: none; white-space: nowrap; }
+.wiki-table td { min-width: 8em; }
+.wiki-table .wiki-code { overflow-wrap: normal; word-break: normal; white-space: nowrap; }

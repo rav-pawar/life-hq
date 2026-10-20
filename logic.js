@@ -331,6 +331,128 @@
     return [...out.values()].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   }
 
+
+  // ---- Wiki (v17): a packed document tree from the encrypted data (tools/wiki-build.js). Never HTML: the app builds
+  // DOM nodes with textContent from the tree this sanitizer returns; diagrams are SVG images (data: URIs via <img>).
+  const WIKI_SEC_RE = /^sec-[a-z0-9-]{1,60}$/;
+  const WIKI_FIG_RE = /^f\d{1,3}$/;
+  function wikiHref(u) {
+    return typeof u === 'string' && ((/^https:\/\/[^\s"'<>\\]+$/i.test(u) && u.length <= 500) || WIKI_SEC_RE.test(u.slice(1)) && u[0] === '#') ? u : null;
+  }
+  function wikiSvgOk(svg) {
+    return typeof svg === 'string' && svg.length <= 400000 && /^<svg\b[^>]*>[\s\S]*<\/svg>$/.test(svg) &&
+      !/<script|<foreignObject|<iframe|<object|<embed|<image\b|<use\b|<a\b|\son[a-z]+\s*=|javascript:|@import|(?:xlink:)?href\s*=\s*["'](?!#)/i.test(svg);
+  }
+  function wikiInline(x) {
+    if (!Array.isArray(x)) return typeof x === 'string' ? [x.slice(0, 4000)] : [];
+    const out = [];
+    for (const n of x.slice(0, 400)) {
+      if (typeof n === 'string') out.push(n.slice(0, 4000));
+      else if (n && typeof n.c === 'string' && (n.t === 'b' || n.t === 'i' || n.t === 'code')) out.push({ t: n.t, c: n.c.slice(0, 1000) });
+      else if (n && n.t === 'a' && typeof n.c === 'string') { const h = wikiHref(n.href); out.push(h ? { t: 'a', c: n.c.slice(0, 300), href: h } : n.c.slice(0, 300)); }
+    }
+    return out;
+  }
+  function wikiBlocks(list, figs) {
+    const out = [];
+    for (const b of (Array.isArray(list) ? list : []).slice(0, 600)) {
+      if (!b || typeof b !== 'object') continue;
+      if (b.t === 'p' || b.t === 'quote') out.push({ t: b.t, c: wikiInline(b.c) });
+      else if (b.t === 'h' && (b.l === 3 || b.l === 4)) out.push({ t: 'h', l: b.l, c: wikiInline(b.c) });
+      else if ((b.t === 'ul' || b.t === 'ol') && Array.isArray(b.items))
+        out.push({ t: b.t, items: b.items.slice(0, 200).filter(i => i && typeof i === 'object').map(i => {
+          const it = { c: wikiInline(i.c) };
+          if (Array.isArray(i.sub)) it.sub = i.sub.slice(0, 50).filter(j => j && typeof j === 'object').map(j => ({ c: wikiInline(j.c) }));
+          return it;
+        }) });
+      else if (b.t === 'code' && typeof b.text === 'string') out.push({ t: 'code', text: b.text.slice(0, 20000) });
+      else if (b.t === 'table' && Array.isArray(b.head) && Array.isArray(b.rows))
+        out.push({ t: 'table', head: b.head.slice(0, 12).map(wikiInline), rows: b.rows.slice(0, 300).filter(Array.isArray).map(r => r.slice(0, 12).map(wikiInline)) });
+      else if (b.t === 'hr') out.push({ t: 'hr' });
+      else if (b.t === 'fig' && typeof b.f === 'string' && figs[b.f]) out.push({ t: 'fig', f: b.f, alt: typeof b.alt === 'string' ? b.alt.slice(0, 300) : 'Diagram' });
+    }
+    return out;
+  }
+  // doc: the parsed JSON tree. Returns { title, intro, sections:[{id,title,blocks}], figs:{id:{src,w,h}} } or null.
+  function wikiSanitize(doc) {
+    if (!doc || typeof doc !== 'object' || !Array.isArray(doc.sections)) return null;
+    const figs = {};
+    for (const [k, f] of Object.entries(doc.figs && typeof doc.figs === 'object' ? doc.figs : {}).slice(0, 40)) {
+      if (!WIKI_FIG_RE.test(k) || !f || !wikiSvgOk(f.svg)) continue;
+      const w = Number(f.w), h = Number(f.h);
+      if (!(w >= 1 && w <= 6000 && h >= 1 && h <= 6000)) continue;
+      figs[k] = { src: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(f.svg), w: Math.round(w), h: Math.round(h) };
+    }
+    const seen = new Set(), sections = [];
+    for (const sec of doc.sections.slice(0, 60)) {
+      if (!sec || !WIKI_SEC_RE.test(sec.id) || seen.has(sec.id) || typeof sec.title !== 'string') continue;
+      seen.add(sec.id);
+      sections.push({ id: sec.id, title: sec.title.slice(0, 120), blocks: wikiBlocks(sec.blocks, figs) });
+    }
+    return { title: typeof doc.title === 'string' ? doc.title.slice(0, 120) : 'Wiki', intro: wikiBlocks(doc.intro, figs), sections, figs };
+  }
+  // The packed wiki in the data, if well-formed: { doc (base64 gzip), hash, builtAt }.
+  function wikiPacked(data) {
+    const w = data && data.wiki;
+    if (!w || w.v !== 2 || typeof w.doc !== 'string' || w.doc.length > 3000000 || !/^[A-Za-z0-9+/]+=*$/.test(w.doc)) return null;
+    return { doc: w.doc, hash: typeof w.hash === 'string' ? w.hash.slice(0, 32) : '', builtAt: typeof w.builtAt === 'string' ? w.builtAt : null };
+  }
+
+  // ---- Ideas (v17): feature ideas synced through the inbox (idea.add / idea.edit / idea.status / idea.delete) ----
+  const IDEA_ID_RE = /^i-[a-z0-9]{6,40}$/;
+  const IDEA_TITLE_MAX = 120, IDEA_DETAILS_MAX = 2000;
+  const IDEA_STATUSES = ['new', 'planned', 'in-progress', 'done', 'dropped'];
+  const IDEA_STATUS_LABEL = { 'new': 'New', planned: 'Planned', 'in-progress': 'In progress', done: 'Done', dropped: 'Dropped' };
+  const IDEA_PRIORITIES = ['high', 'medium', 'low'];
+  function cleanIdeaTitle(t) {
+    if (typeof t !== 'string' || t.length > IDEA_TITLE_MAX * 2) return null;
+    const s = t.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return s && s.length <= IDEA_TITLE_MAX ? s : null;
+  }
+  function cleanIdeaDetails(t) {
+    if (t === null || t === undefined) return '';
+    if (typeof t !== 'string' || t.length > IDEA_DETAILS_MAX * 2) return null;
+    const s = t.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, '').replace(/\n{3,}/g, '\n\n').trim();
+    return s.length <= IDEA_DETAILS_MAX ? s : null;
+  }
+  const ideaPriority = p => IDEA_PRIORITIES.includes(p) ? p : null;
+  // Data ideas + this device's pending taps (idea:<id> add / edit / delete, ideast:<id> status). Sorted: in progress,
+  // planned, new, done, dropped; then priority; then most recently updated.
+  function ideaItems(data, overrides) {
+    const ideas = (data && data.ideas) || {}, gone = new Set(Array.isArray(ideas.deleted) ? ideas.deleted : []);
+    const out = new Map();
+    for (const it of (Array.isArray(ideas.items) ? ideas.items : [])) {
+      if (!it || !IDEA_ID_RE.test(it.id) || gone.has(it.id)) continue;
+      const title = cleanIdeaTitle(it.title); if (!title) continue;
+      out.set(it.id, { id: it.id, title, details: cleanIdeaDetails(it.details) || '', status: IDEA_STATUSES.includes(it.status) ? it.status : 'new',
+        priority: ideaPriority(it.priority), createdAt: it.createdAt || null, updatedAt: it.updatedAt || it.createdAt || null, pending: false, seed: !!it.seed });
+    }
+    const ov = Object.entries(overrides || {});
+    for (const [k, v] of ov) {
+      if (!k.startsWith('idea:') || !v) continue;
+      const id = k.slice(5); if (!IDEA_ID_RE.test(id) || gone.has(id)) continue;
+      const at = v.at ? new Date(v.at).toISOString() : null;
+      if (v.op === 'delete') { out.delete(id); continue; }
+      const title = cleanIdeaTitle(v.title); if (!title) continue;
+      const fields = { title, details: cleanIdeaDetails(v.details) || '', priority: ideaPriority(v.priority) };
+      const cur = out.get(id);
+      if (v.op === 'add' && !cur) out.set(id, Object.assign({ id, status: IDEA_STATUSES.includes(v.status) ? v.status : 'new', createdAt: v.createdAt || at, updatedAt: at, seed: false }, fields, { pending: true }));
+      else if (v.op === 'edit' && cur) {
+        const same = cur.title === fields.title && cur.details === fields.details && cur.priority === fields.priority;
+        out.set(id, Object.assign({}, cur, fields, same ? {} : { pending: true, updatedAt: at || cur.updatedAt }));
+      }
+    }
+    for (const [k, v] of ov) {
+      if (!k.startsWith('ideast:') || !v || !IDEA_STATUSES.includes(v.status)) continue;
+      const cur = out.get(k.slice(7));
+      if (cur && cur.status !== v.status) out.set(cur.id, Object.assign({}, cur, { status: v.status, pending: true, statusPending: true, updatedAt: v.at ? new Date(v.at).toISOString() : cur.updatedAt }));
+    }
+    const ORDER = ['in-progress', 'planned', 'new', 'done', 'dropped'];
+    const so = s => ORDER.indexOf(s), po = p => p ? IDEA_PRIORITIES.indexOf(p) : 3;
+    return [...out.values()].sort((a, b) => so(a.status) - so(b.status) || po(a.priority) - po(b.priority) ||
+      String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')) || a.id.localeCompare(b.id));
+  }
+
   // ---- Festivals ----
   const UPCOMING_FESTIVAL_DAYS = 21;
 
@@ -568,7 +690,7 @@
 
   g.LifeLogic = { istDate, istMinutes, istWeekday, addDays, daysBetween, weekdayOf, hhmmToMin, fmtTime, fmtDate, relDays, isYMD,
     settingsOf, nextMaintenanceSaturday, isMaintenanceSaturday, maintenanceTasks, maintenanceWeekend, maintenanceOverview, applianceIcon, moneyItems,
-    noticeItems, calendarEvents, todoItems, todoView, todoTickable, TODO_ID_RE, noteItems, cleanNoteText, NOTE_MAX, NOTE_ID_RE, dedupeLead, schoolDay, holidayEntry, holidayDates, noSchoolReason, nextSchoolDay,
+    noticeItems, calendarEvents, todoItems, todoView, todoTickable, TODO_ID_RE, noteItems, cleanNoteText, NOTE_MAX, NOTE_ID_RE, wikiSanitize, wikiPacked, wikiHref, wikiSvgOk, ideaItems, cleanIdeaTitle, cleanIdeaDetails, IDEA_ID_RE, IDEA_STATUSES, IDEA_STATUS_LABEL, IDEA_PRIORITIES, IDEA_TITLE_MAX, IDEA_DETAILS_MAX, dedupeLead, schoolDay, holidayEntry, holidayDates, noSchoolReason, nextSchoolDay,
     chargingDevices, supplyItems, festivalDayInfo, festivalTriviaToday, activeFestivals, upcomingFestivals,
     todayItems, dueAlerts, noticePushTitle, sensitiveReason, pushSafeText, schoolRunPush };
   if (typeof module === 'object' && module.exports) module.exports = g.LifeLogic;

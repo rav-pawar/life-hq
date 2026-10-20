@@ -7,7 +7,7 @@
   const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   let reg = null;
   // Version of this page's code; must equal CACHE in sw.js (bump both together). A different live sw.js = new code.
-  const APP_VERSION = 'life-hq-v16';
+  const APP_VERSION = 'life-hq-v17';
 
   // In-memory only. Plaintext data is never written to storage.
   const st = { env: null, device: null, data: null, overrides: {}, flashId: null, noData: false, lastSync: 0, offline: false, lastCheck: 0 };
@@ -91,12 +91,13 @@
   }
 
   function showLock(msg) {
-    flushNoteDeletes(); noteEdit = null; // a delete waiting on its Undo toast is still queued
+    flushNoteDeletes(); noteEdit = null; ideaEdit = null; wiki.hash = null; // a delete waiting on its Undo toast is still queued
     st.data = null;
     $('dash').classList.add('hidden');
     $('tabs').classList.add('hidden');
-    for (const id of ['todayList', 'calendarBox', 'todoBox', 'todoSection', 'notesList', 'moneyList', 'noticeList', 'familyList', 'chargingList', 'weekendBox', 'homeList', 'suppliesList', 'urgentList', 'summaryList', 'infoList']) $(id).replaceChildren();
+    for (const id of ['todayList', 'calendarBox', 'todoBox', 'todoSection', 'notesList', 'ideasList', 'wikiBox', 'moneyList', 'noticeList', 'familyList', 'chargingList', 'weekendBox', 'homeList', 'suppliesList', 'urgentList', 'summaryList', 'infoList']) $(id).replaceChildren();
     $('noteInput').value = '';
+    $('ideaTitle').value = ''; $('ideaDetails').value = ''; ideaDraft.title = ideaDraft.details = '';
     $('syncJson').value = '';
     $('lock').classList.remove('hidden');
     $('lockMsg').textContent = msg || '';
@@ -187,6 +188,14 @@
       if (v.op === 'edit') { const n = find(notes.items); return gone || (!!n && n.text === v.text); }
       return v.op === 'delete' ? gone : (gone || !!find(notes.items));
     }
+    if (kind === 'idea' || kind === 'ideast') {
+      // Applied = the box has it (add / edit / status) or a tombstone (any op): a delete is never cleared before it lands.
+      const ideas = d.ideas || {}, gone = (ideas.deleted || []).includes(id), it = find(ideas.items);
+      if (kind === 'ideast') return gone || !it || it.status === v.status;
+      if (v.op === 'delete') return gone;
+      if (v.op === 'edit') return gone || !it || (it.title === v.title && (it.details || '') === (v.details || '') && (it.priority || null) === (v.priority || null));
+      return gone || !!it;
+    }
     return true; // unknown kind: nothing to sync
   }
   async function loadOverrides() {
@@ -222,6 +231,10 @@
       else if (kind === 'tododis') change = { type: v.dismissed ? 'todo.dismiss' : 'todo.restore', id, at };
       else if (kind === 'noticedis') change = { type: v.dismissed ? 'notice.dismiss' : 'notice.restore', id, at };
       else if (kind === 'note') change = v.op === 'delete' ? { type: 'note.delete', id, at } : v.op === 'edit' ? { type: 'note.edit', id, text: v.text, at } : { type: 'note.add', id, text: v.text, createdAt: v.createdAt, at };
+      else if (kind === 'idea') change = v.op === 'delete' ? { type: 'idea.delete', id, at }
+        : v.op === 'edit' ? { type: 'idea.edit', id, title: v.title, details: v.details || '', priority: v.priority || null, at }
+        : { type: 'idea.add', id, title: v.title, details: v.details || '', status: v.status || 'new', priority: v.priority || null, createdAt: v.createdAt, at };
+      else if (kind === 'ideast') change = { type: 'idea.status', id, status: v.status, at };
       if (change) out.push({ key: k, v, change });
     }
     return out.sort((a, b) => a.change.at.localeCompare(b.change.at));
@@ -528,7 +541,8 @@
       (a.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|reset|range|color|file|image)$/i.test(a.type)))) return 'typing';
     if (!$('settings').classList.contains('hidden')) return 'settings';
     if (upd.dialogs) return 'dialog';
-    if (noteUndo.size) return 'undo';
+    if (noteUndo.size || ideaUndo.size) return 'undo';
+    if (ideaEdit || noteEdit) return 'editing';
     if (nav.lockId) return 'scrolling';
     return '';
   }
@@ -970,16 +984,16 @@
   }
   // Delete: hide now, show "Deleted · Undo" for ~6 s, then queue. A newer delete commits the older one at once.
   function deleteNote(n) {
-    for (const id of [...noteUndo.keys()]) commitDelete(id);
+    commitAllDeletes();
     if (noteEdit && noteEdit.id === n.id) noteEdit = null;
     noteUndo.set(n.id, { note: n, timer: setTimeout(() => commitDelete(n.id), UNDO_MS) });
     renderNotes();
-    showUndo();
+    showUndo('Note deleted');
   }
   async function commitDelete(id) {
     const u = noteUndo.get(id); if (!u) return;
     clearTimeout(u.timer); noteUndo.delete(id);
-    if (!noteUndo.size) hideUndo();
+    if (!noteUndo.size && !ideaUndo.size) hideUndo();
     const key = 'note:' + id, v = st.overrides[key];
     // Never left this device (queued add, not sent): just drop it. Otherwise queue a delete for every device.
     if (u.note.pending && v && v.op === 'add' && !sync.sent[key]) await delLocal(key);
@@ -988,14 +1002,14 @@
   function undoDelete() {
     const ids = [...noteUndo.keys()];
     for (const id of ids) clearTimeout(noteUndo.get(id).timer);
-    noteUndo.clear(); hideUndo(); renderNotes();
+    noteUndo.clear(); if (!ideaUndo.size) hideUndo(); renderNotes();
     const b = ids.length && document.querySelector(`#notesList .note-item[data-id="${ids[ids.length - 1]}"] .note-btns button`);
     if (b) b.focus();
     toast('Note restored');
   }
-  function showUndo() {
+  function showUndo(msg) {
     const bar = $('undoBar');
-    $('undoMsg').textContent = 'Note deleted';
+    $('undoMsg').textContent = msg || 'Deleted';
     bar.classList.remove('hidden');
     bar.style.setProperty('--undo-ms', UNDO_MS + 'ms');
     bar.classList.remove('run'); void bar.offsetWidth; bar.classList.add('run');
@@ -1006,7 +1020,315 @@
     if (document.activeElement === $('undoBtn')) { const f = $('noteInput'); if (f && f.offsetParent) f.focus({ preventScroll: true }); }
   }
   // Leaving the page while the toast is up commits the delete (it was the user's intent).
-  function flushNoteDeletes() { for (const id of [...noteUndo.keys()]) commitDelete(id); }
+  function flushNoteDeletes() { commitAllDeletes(); }
+
+  // ================= Ideas (v17) =================
+  // Feature ideas, synced like notes: idea:<id> taps (op add / edit / delete) and ideast:<id> (status). Optimistic:
+  // shown at once with "queued" / "sent"; a delete hides the idea and waits ~6 s on the shared Undo toast.
+  const ideaUndo = new Map(); // id -> { idea, timer }
+  let ideaEdit = null;        // { id, title, details, priority }
+  const ideaDraft = { title: '', details: '', priority: '' };
+  const IDEA_PILL = { 'new': '', planned: 'amber', 'in-progress': 'blue', done: 'green', dropped: 'muted-pill' };
+  const ymdOf = iso => (iso && Date.parse(iso)) ? L.istDate(Date.parse(iso)) : null;
+  const shortDate = iso => { const y = ymdOf(iso); return y ? L.fmtDate(y) : ''; };
+  function prioritySelect(value, label) {
+    const s = el('select', 'idea-select');
+    s.setAttribute('aria-label', label);
+    for (const [v, t] of [['', 'No priority'], ['high', 'High'], ['medium', 'Medium'], ['low', 'Low']]) { const o = el('option', '', t); o.value = v; s.appendChild(o); }
+    s.value = value || '';
+    return s;
+  }
+  function statusSelect(value, label) {
+    const s = el('select', 'idea-select');
+    s.setAttribute('aria-label', label);
+    for (const v of L.IDEA_STATUSES) { const o = el('option', '', L.IDEA_STATUS_LABEL[v]); o.value = v; s.appendChild(o); }
+    s.value = value;
+    return s;
+  }
+  function ideaSyncPill(id) {
+    const keys = ['idea:' + id, 'ideast:' + id].filter(k => st.overrides[k]);
+    if (!keys.length) return null;
+    const sent = keys.every(k => sync.sent[k] && sync.sent[k].at === st.overrides[k].at);
+    return pill(sent ? 'sent' : 'queued', sent ? 'blue' : 'amber');
+  }
+  function ideaCard(it) {
+    const c = el('div', 'item idea-item' + (it.status === 'done' || it.status === 'dropped' ? ' idea-closed' : ''));
+    c.dataset.id = it.id;
+    if (ideaEdit && ideaEdit.id === it.id) { c.classList.add('editing'); c.appendChild(ideaEditor(it)); return c; }
+    const head = el('div', 'idea-head');
+    head.appendChild(el('p', 'title idea-title', it.title));
+    const pills = el('div', 'idea-pills');
+    pills.appendChild(pill(L.IDEA_STATUS_LABEL[it.status], 'idea-st ' + (IDEA_PILL[it.status] || '')));
+    if (it.priority) pills.appendChild(pill(it.priority[0].toUpperCase() + it.priority.slice(1), 'idea-pri pri-' + it.priority));
+    const sp = ideaSyncPill(it.id); if (sp) pills.appendChild(sp);
+    head.appendChild(pills);
+    c.appendChild(head);
+    if (it.details) {
+      if (it.details.length > 220) {
+        const det = el('details', 'more idea-more');
+        const sum = el('summary', 'more-sum'); sum.append(el('span', 'idea-teaser', it.details.slice(0, 160).replace(/\s+\S*$/, '') + '…'), el('span', 'chev', '›'));
+        det.append(sum, el('p', 'idea-details', it.details));
+        remember(det, 'idea:' + it.id, false);
+        c.appendChild(det);
+      } else c.appendChild(el('p', 'idea-details', it.details));
+    }
+    const created = shortDate(it.createdAt), updated = shortDate(it.updatedAt);
+    const meta = [created ? 'Added ' + created : '', updated && updated !== created ? 'updated ' + updated : ''].filter(Boolean).join(' · ');
+    const bar = el('div', 'idea-bar');
+    bar.appendChild(el('span', 'sub idea-meta', meta));
+    const ctl = el('div', 'idea-ctl');
+    const ss = statusSelect(it.status, 'Status of idea: ' + it.title.slice(0, 40));
+    ss.addEventListener('change', () => setIdeaStatus(it, ss.value));
+    const edit = btn('Edit', 'ghost', () => { ideaEdit = { id: it.id, title: it.title, details: it.details, priority: it.priority || '' }; renderIdeas(); focusIdeaEditor(); });
+    edit.setAttribute('aria-label', 'Edit idea: ' + it.title.slice(0, 40));
+    const del = btn('Delete', 'ghost', () => deleteIdea(it));
+    del.setAttribute('aria-label', 'Delete idea: ' + it.title.slice(0, 40));
+    ctl.append(ss, edit, del);
+    bar.appendChild(ctl);
+    c.appendChild(bar);
+    return c;
+  }
+  function ideaFields(state, prefix) {
+    const t = el('input', 'idea-input'); t.type = 'text'; t.maxLength = L.IDEA_TITLE_MAX * 2; t.value = state.title;
+    t.placeholder = 'Idea title'; t.setAttribute('aria-label', prefix + ' title'); t.autocomplete = 'off';
+    const d = el('textarea', 'idea-text'); d.rows = 3; d.maxLength = L.IDEA_DETAILS_MAX * 2; d.value = state.details;
+    d.placeholder = 'Details (optional)'; d.setAttribute('aria-label', prefix + ' details');
+    const p = prioritySelect(state.priority, prefix + ' priority');
+    const count = el('span', 'muted small idea-counter');
+    t.addEventListener('input', () => { state.title = t.value; }); d.addEventListener('input', () => { state.details = d.value; });
+    p.addEventListener('change', () => { state.priority = p.value; });
+    return { t, d, p, count };
+  }
+  function ideaValid(state) {
+    const title = L.cleanIdeaTitle(state.title), details = L.cleanIdeaDetails(state.details);
+    if (!title) return { err: `Titles are 1–${L.IDEA_TITLE_MAX} characters` };
+    if (details === null) return { err: `Details are up to ${L.IDEA_DETAILS_MAX} characters` };
+    return { title, details, priority: L.IDEA_PRIORITIES.includes(state.priority) ? state.priority : null };
+  }
+  function ideaEditor(it) {
+    const box = el('div', 'idea-edit');
+    const f = ideaFields(ideaEdit, 'Edit idea');
+    const save = el('button', 'btn small primary', 'Save'), cancel = el('button', 'btn small ghost', 'Cancel');
+    save.type = cancel.type = 'button';
+    const upd8 = () => {
+      const v = ideaValid(ideaEdit);
+      f.count.textContent = `${ideaEdit.title.trim().length}/${L.IDEA_TITLE_MAX} · ${ideaEdit.details.length}/${L.IDEA_DETAILS_MAX}`;
+      save.disabled = !!v.err || (v.title === it.title && v.details === it.details && v.priority === (it.priority || null));
+    };
+    for (const x of [f.t, f.d]) x.addEventListener('input', upd8);
+    f.p.addEventListener('change', upd8);
+    const keys = ev => {
+      if (ev.key === 'Escape') { ev.preventDefault(); cancelIdeaEdit(); }
+      else if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey || ev.target === f.t)) { ev.preventDefault(); if (!save.disabled) saveIdeaEdit(it); }
+    };
+    f.t.addEventListener('keydown', keys); f.d.addEventListener('keydown', keys);
+    save.addEventListener('click', () => saveIdeaEdit(it));
+    cancel.addEventListener('click', cancelIdeaEdit);
+    const bar = el('div', 'idea-edit-bar'); bar.append(f.p, f.count, cancel, save);
+    box.append(f.t, f.d, bar);
+    upd8();
+    return box;
+  }
+  function focusIdeaEditor() { const t = document.querySelector('#ideasList .idea-edit .idea-input'); if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); } }
+  function focusIdea(id) { const b = id && document.querySelector(`#ideasList .idea-item[data-id="${id}"] .idea-ctl button`); if (b) b.focus({ preventScroll: true }); }
+  function cancelIdeaEdit() { const id = ideaEdit && ideaEdit.id; ideaEdit = null; renderIdeas(); focusIdea(id); }
+  async function saveIdeaEdit(it) {
+    const v = ideaValid(ideaEdit || {});
+    if (v.err) { toast(v.err, true); return; }
+    const id = it.id, key = 'idea:' + id, cur = st.overrides[key];
+    ideaEdit = null;
+    if (v.title === it.title && v.details === it.details && v.priority === (it.priority || null)) { renderIdeas(); return; }
+    // Still only on this device (queued add, not sent): rewrite the add. Otherwise queue an edit for every device.
+    if (cur && cur.op === 'add' && !sync.sent[key]) await setLocal(key, Object.assign(bareTap(cur), v));
+    else await setLocal(key, Object.assign({ op: 'edit' }, v));
+    focusIdea(id);
+    toast('Idea updated · syncing to your other devices');
+  }
+  async function setIdeaStatus(it, status) {
+    if (!L.IDEA_STATUSES.includes(status) || status === it.status) return;
+    const key = 'idea:' + it.id, cur = st.overrides[key];
+    if (cur && cur.op === 'add' && !sync.sent[key]) await setLocal(key, Object.assign(bareTap(cur), { status }));
+    else await setLocal('ideast:' + it.id, { status });
+    focusIdea(it.id);
+    toast(`${L.IDEA_STATUS_LABEL[status]} · syncing to your other devices`);
+  }
+  function bareTap(v) { const o = Object.assign({}, v); delete o.at; delete o.keep; return o; }
+  function newIdeaId() {
+    const r = new Uint8Array(6); crypto.getRandomValues(r);
+    return 'i-' + Date.now().toString(36) + Array.from(r, b => (b % 36).toString(36)).join('');
+  }
+  async function addIdea() {
+    const v = ideaValid(ideaDraft);
+    if (v.err) { toast(v.err, true); return; }
+    await setLocal('idea:' + newIdeaId(), Object.assign({ op: 'add', status: 'new', createdAt: new Date().toISOString() }, v));
+    ideaDraft.title = ideaDraft.details = ideaDraft.priority = '';
+    $('ideaTitle').value = ''; $('ideaDetails').value = ''; $('ideaPriority').value = '';
+    updateIdeaForm();
+    toast('Idea added · syncing to your other devices');
+  }
+  function updateIdeaForm() {
+    const t = $('ideaTitle').value, d = $('ideaDetails').value;
+    ideaDraft.title = t; ideaDraft.details = d; ideaDraft.priority = $('ideaPriority').value;
+    $('ideaCounter').textContent = `${t.trim().length}/${L.IDEA_TITLE_MAX}`;
+    const bad = t.trim().length > L.IDEA_TITLE_MAX || d.length > L.IDEA_DETAILS_MAX;
+    $('ideaCounter').classList.toggle('red-text', bad);
+    $('addIdeaBtn').disabled = !t.trim() || bad;
+  }
+  function deleteIdea(it) {
+    commitAllDeletes();
+    if (ideaEdit && ideaEdit.id === it.id) ideaEdit = null;
+    ideaUndo.set(it.id, { idea: it, timer: setTimeout(() => commitIdeaDelete(it.id), UNDO_MS) });
+    renderIdeas();
+    showUndo('Idea deleted');
+  }
+  async function commitIdeaDelete(id) {
+    const u = ideaUndo.get(id); if (!u) return;
+    clearTimeout(u.timer); ideaUndo.delete(id);
+    if (!noteUndo.size && !ideaUndo.size) hideUndo();
+    const key = 'idea:' + id, v = st.overrides[key];
+    await delLocal('ideast:' + id).catch(() => {});
+    if (u.idea.pending && v && v.op === 'add' && !sync.sent[key]) await delLocal(key);
+    else await setLocal(key, { op: 'delete' });
+  }
+  function renderIdeas() {
+    const items = L.ideaItems(st.data, st.overrides).filter(i => !ideaUndo.has(i.id));
+    if (ideaEdit && !items.some(i => i.id === ideaEdit.id)) ideaEdit = null;
+    const open = items.filter(i => i.status !== 'done' && i.status !== 'dropped'), closed = items.filter(i => !open.includes(i));
+    $('ideaCount').textContent = String(open.length);
+    const out = open.map(ideaCard);
+    if (!open.length) out.push(el('p', 'empty', items.length ? 'No open ideas.' : 'No ideas yet. Add the first one above.'));
+    if (closed.length) {
+      const det = el('details', 'more-rows idea-closed-group');
+      const sum = el('summary'); sum.append(el('span', 'muted', `Done & dropped (${closed.length})`), el('span', 'chev', '›'));
+      det.appendChild(sum);
+      const box = el('div', 'list'); closed.forEach(i => box.appendChild(ideaCard(i))); det.appendChild(box);
+      remember(det, 'ideas-closed', false);
+      out.push(det);
+    }
+    $('ideasList').replaceChildren(...out);
+  }
+
+  // Shared Undo toast (notes + ideas): one pending delete at a time; a newer delete commits the older one.
+  function commitAllDeletes() { for (const id of [...noteUndo.keys()]) commitDelete(id); for (const id of [...ideaUndo.keys()]) commitIdeaDelete(id); }
+  function undoAny() {
+    if (ideaUndo.size) {
+      const ids = [...ideaUndo.keys()];
+      for (const id of ids) clearTimeout(ideaUndo.get(id).timer);
+      ideaUndo.clear();
+      if (!noteUndo.size) hideUndo();
+      renderIdeas(); focusIdea(ids[ids.length - 1]); toast('Idea restored');
+    }
+    if (noteUndo.size) undoDelete();
+  }
+
+  // ================= Wiki (v17) =================
+  // The packed wiki (gzip + base64 inside the encrypted data) is inflated with the browser's DecompressionStream,
+  // re-validated by L.wikiSanitize and built with DOM calls only (textContent; links https or in-page; diagrams are
+  // SVG data: images, so nothing in them can run). Rebuilt only when the wiki changes, so open sections stay open.
+  const wiki = { hash: null, busy: false };
+  async function inflateWiki(b64) {
+    const bin = atob(b64), u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const stream = new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return JSON.parse(await new Response(stream).text());
+  }
+  function wikiInline(parent, nodes) {
+    for (const n of nodes) {
+      if (typeof n === 'string') parent.appendChild(document.createTextNode(n));
+      else if (n.t === 'b') parent.appendChild(el('strong', '', n.c));
+      else if (n.t === 'i') parent.appendChild(el('em', '', n.c));
+      else if (n.t === 'code') parent.appendChild(el('code', 'wiki-code', n.c));
+      else if (n.t === 'a' && n.href[0] === '#') { const a = el('a', 'link', n.c); a.href = n.href; a.addEventListener('click', ev => { ev.preventDefault(); openWikiSection(n.href.slice(1)); }); parent.appendChild(a); }
+      else if (n.t === 'a') { const a = extLink(n.c, n.href); parent.appendChild(a || document.createTextNode(n.c)); }
+    }
+    return parent;
+  }
+  function wikiBlock(b, figs) {
+    if (b.t === 'p') return wikiInline(el('p', 'wiki-p'), b.c);
+    if (b.t === 'quote') return wikiInline(el('blockquote', 'wiki-quote'), b.c);
+    if (b.t === 'h') return wikiInline(el(b.l === 3 ? 'h4' : 'h5', 'wiki-h' + b.l), b.c);
+    if (b.t === 'hr') return el('hr', 'wiki-hr');
+    if (b.t === 'code') { const pre = el('pre', 'wiki-pre'); pre.appendChild(el('code', '', b.text)); pre.tabIndex = 0; return pre; }
+    if (b.t === 'ul' || b.t === 'ol') {
+      const list = el(b.t, 'wiki-list');
+      for (const it of b.items) {
+        const li = wikiInline(el('li'), it.c);
+        if (it.sub && it.sub.length) { const sub = el('ul', 'wiki-list'); it.sub.forEach(s => sub.appendChild(wikiInline(el('li'), s.c))); li.appendChild(sub); }
+        list.appendChild(li);
+      }
+      return list;
+    }
+    if (b.t === 'table') {
+      const wrap = el('div', 'wiki-table'); wrap.tabIndex = 0; wrap.setAttribute('role', 'region'); wrap.setAttribute('aria-label', 'Table');
+      const t = el('table'), th = el('thead'), tr = el('tr');
+      b.head.forEach(c => tr.appendChild(wikiInline(el('th'), c))); th.appendChild(tr); t.appendChild(th);
+      const tb = el('tbody');
+      b.rows.forEach(r => { const row = el('tr'); r.forEach(c => row.appendChild(wikiInline(el('td'), c))); tb.appendChild(row); });
+      t.appendChild(tb); wrap.appendChild(t);
+      return wrap;
+    }
+    if (b.t === 'fig') {
+      const f = figs[b.f]; if (!f) return null;
+      const fig = el('figure', 'wiki-fig');
+      const scroll = el('div', 'wiki-fig-scroll'); scroll.tabIndex = 0; scroll.setAttribute('role', 'region'); scroll.setAttribute('aria-label', b.alt);
+      const img = el('img'); img.src = f.src; img.alt = b.alt; img.width = f.w; img.height = f.h; img.loading = 'lazy'; img.decoding = 'async';
+      scroll.appendChild(img); fig.appendChild(scroll);
+      const zoom = el('button', 'btn small ghost wiki-zoom', '⤢ Full size'); zoom.type = 'button';
+      zoom.addEventListener('click', () => { const z = fig.classList.toggle('zoom'); zoom.textContent = z ? '⤡ Fit width' : '⤢ Full size'; zoom.setAttribute('aria-pressed', String(z)); });
+      zoom.setAttribute('aria-pressed', 'false');
+      const cap = el('figcaption', 'muted small'); cap.append(el('span', '', b.alt), zoom);
+      fig.appendChild(cap);
+      return fig;
+    }
+    return null;
+  }
+  function openWikiSection(id) {
+    const det = document.getElementById('w-' + id); if (!det) return;
+    det.open = true;
+    const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    det.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    const s = det.querySelector('summary'); if (s) s.focus({ preventScroll: true });
+  }
+  async function renderWiki() {
+    const packed = L.wikiPacked(st.data);
+    const box = $('wikiBox');
+    if (!packed) { wiki.hash = null; $('wikiBuilt').textContent = ''; box.replaceChildren(el('p', 'empty', 'No wiki in the data yet.')); return; }
+    if (wiki.hash === packed.hash || wiki.busy) return;
+    wiki.busy = true;
+    try {
+      if (typeof DecompressionStream === 'undefined') throw new Error('this browser cannot unpack the wiki (needs a recent Chrome)');
+      const doc = L.wikiSanitize(await inflateWiki(packed.doc));
+      if (!doc) throw new Error('the wiki data is not valid');
+      $('wikiBuilt').textContent = packed.builtAt ? 'Updated ' + fmtIST(Date.parse(packed.builtAt)) : '';
+      const out = [];
+      doc.intro.forEach(b => { const n = wikiBlock(b, doc.figs); if (n) out.push(n); });
+      const toc = el('details', 'card-lite wiki-toc');
+      const ts = el('summary'); ts.append(el('span', 'title', `Contents (${doc.sections.length})`), el('span', 'chev', '›')); toc.appendChild(ts);
+      const ol = el('ol', 'wiki-toc-list');
+      for (const s of doc.sections) {
+        const a = el('a', 'link', s.title); a.href = '#' + s.id;
+        a.addEventListener('click', ev => { ev.preventDefault(); openWikiSection(s.id); });
+        const li = el('li'); li.appendChild(a); ol.appendChild(li);
+      }
+      toc.appendChild(ol); remember(toc, 'wiki-toc', true, true); out.push(toc);
+      for (const s of doc.sections) {
+        const det = el('details', 'wiki-sec'); det.id = 'w-' + s.id;
+        const sum = el('summary'); sum.append(el('h3', 'wiki-title', s.title), el('span', 'chev', '›')); det.appendChild(sum);
+        const body = el('div', 'wiki-body'); det.appendChild(body);
+        let built = false;
+        const build = () => { if (built) return; built = true; s.blocks.forEach(b => { const n = wikiBlock(b, doc.figs); if (n) body.appendChild(n); }); };
+        det.addEventListener('toggle', () => { if (det.open) build(); });
+        remember(det, 'wiki:' + s.id, false, true);
+        if (det.open) build();
+        out.push(det);
+      }
+      box.replaceChildren(...out);
+      wiki.hash = packed.hash;
+    } catch (e) {
+      console.error('wiki', e);
+      box.replaceChildren(el('p', 'empty', '⚠️ The wiki could not be shown: ' + e.message));
+    } finally { wiki.busy = false; }
+  }
 
   function renderMoney(today) {
     const rows = L.moneyItems(st.data, st.overrides, today);
@@ -1229,6 +1551,11 @@
     if (c.type === 'note.add') return 'Note: ' + (String(c.text || '').length > 40 ? String(c.text).slice(0, 40) + '…' : c.text);
     if (c.type === 'note.edit') return 'Edit note: ' + (String(c.text || '').length > 40 ? String(c.text).slice(0, 40) + '…' : c.text);
     if (c.type === 'note.delete') return 'Delete note: ' + ((find((d.notes || {}).items).text || c.id).slice(0, 40));
+    if (/^idea\./.test(c.type)) {
+      const t = c.title || find((d.ideas || {}).items).title || c.id, short = String(t).length > 40 ? String(t).slice(0, 40) + '…' : t;
+      return c.type === 'idea.add' ? 'Idea: ' + short : c.type === 'idea.edit' ? 'Edit idea: ' + short
+        : c.type === 'idea.delete' ? 'Delete idea: ' + short : `Idea ${L.IDEA_STATUS_LABEL[c.status] || c.status}: ${short}`;
+    }
     if (c.type === 'supply.update') return `${c.lastBought ? 'Bought' : c.status === 'out' ? 'Out' : c.status === 'low' ? 'Low' : 'OK'}: ${find((d.supplies || {}).items).name || c.id}`;
     const m = find((d.money || {})[c.type === 'card.status' ? 'cards' : 'bills']);
     return `${c.status === 'paid' ? 'Paid' : 'Unpaid'}: ${m.label || m.pushLabel || c.id}`;
@@ -1258,12 +1585,12 @@
     await loadOverrides();
     if (st.data) {
       const now = nowMs(), today = L.istDate(now);
-      const parts = [() => renderToday(now, today), () => renderTodoSection(today), renderNotes, () => renderMoney(today), () => renderFamily(now, today), () => renderFestivals(today),
-        () => renderCharging(now, today), () => renderHome(today), () => renderSupplies(today), renderSync];
+      const parts = [() => renderToday(now, today), () => renderTodoSection(today), renderNotes, renderIdeas, () => renderMoney(today), () => renderFamily(now, today), () => renderFestivals(today),
+        () => renderCharging(now, today), () => renderHome(today), () => renderSupplies(today), renderSync, () => { renderWiki(); }];
       for (const p of parts) { try { p(); } catch (e) { console.error(e); banner('⚠️ Some data could not be shown: ' + e.message); } }
     }
     $('s-today').classList.toggle('hidden', !st.data);
-    for (const id of ['s-todos', 's-notes', 's-money', 's-family', 's-festivals', 's-charging', 's-home', 's-supplies', 's-sync']) $(id).classList.toggle('hidden', !st.data);
+    for (const id of ['s-todos', 's-notes', 's-ideas', 's-wiki', 's-money', 's-family', 's-festivals', 's-charging', 's-home', 's-supplies', 's-sync']) $(id).classList.toggle('hidden', !st.data);
     await renderAlerts();
     updateSyncInfo();
   }
@@ -1494,6 +1821,22 @@
     addEventListener('scroll', () => { if (!nav.raf) nav.raf = requestAnimationFrame(updateActivePill); }, { passive: true });
     addEventListener('resize', () => { if (!nav.raf) nav.raf = requestAnimationFrame(updateActivePill); }, { passive: true });
     addEventListener('hashchange', () => { if (location.hash.startsWith('#s-')) scrollToSection(location.hash.slice(1), false); });
+    // v17: 12 pills. When they do not fit, the row scrolls sideways: fade only the edge(s) with more pills, and let a
+    // mouse wheel scroll it horizontally (no horizontal wheel on most mice).
+    const bar = $('tabs');
+    const fade = () => {
+      const max = bar.scrollWidth - bar.clientWidth;
+      bar.classList.toggle('fade-l', max > 2 && bar.scrollLeft > 2);
+      bar.classList.toggle('fade-r', max > 2 && bar.scrollLeft < max - 2);
+    };
+    bar.addEventListener('scroll', fade, { passive: true });
+    addEventListener('resize', fade, { passive: true });
+    bar.addEventListener('wheel', ev => {
+      if (bar.scrollWidth <= bar.clientWidth + 2 || Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) return;
+      ev.preventDefault(); bar.scrollBy({ left: ev.deltaY, behavior: 'auto' });
+    }, { passive: false });
+    nav.fade = fade;
+    if ('ResizeObserver' in window) new ResizeObserver(fade).observe(bar);
   }
 
   function wire() {
@@ -1524,7 +1867,12 @@
     $('noteInput').addEventListener('input', updateNoteCounter);
     $('noteInput').addEventListener('keydown', ev => { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); if (!$('addNoteBtn').disabled) addNote(); } });
     $('addNoteBtn').addEventListener('click', addNote);
-    $('undoBtn').addEventListener('click', undoDelete);
+    for (const id of ['ideaTitle', 'ideaDetails']) $(id).addEventListener('input', updateIdeaForm);
+    $('ideaPriority').addEventListener('change', updateIdeaForm);
+    $('ideaTitle').addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); if (!$('addIdeaBtn').disabled) addIdea(); } });
+    $('ideaDetails').addEventListener('keydown', ev => { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); if (!$('addIdeaBtn').disabled) addIdea(); } });
+    $('addIdeaBtn').addEventListener('click', addIdea);
+    $('undoBtn').addEventListener('click', undoAny);
     window.addEventListener('pagehide', flushNoteDeletes);
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushNoteDeletes(); });
     if ('serviceWorker' in navigator) {

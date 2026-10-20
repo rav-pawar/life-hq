@@ -20,7 +20,7 @@
       <h1>Life HQ</h1>
     </a>
     <nav id="tabs" class="tabs hidden" aria-label="Sections">
-      <a href="#s-today">Today</a><a href="#s-todos">To-do</a><a href="#s-notes">Notes</a><a href="#s-money">Money</a><a href="#s-family">Family</a><a href="#s-festivals">Festivals</a><a href="#s-charging">Charging</a><a href="#s-home">Home</a><a href="#s-supplies">Supplies</a><a href="#s-alerts">Alerts</a>
+      <a href="#s-today">Today</a><a href="#s-todos">To-do</a><a href="#s-notes">Notes</a><a href="#s-ideas">Ideas</a><a href="#s-money">Money</a><a href="#s-family">Family</a><a href="#s-festivals">Festivals</a><a href="#s-charging">Charging</a><a href="#s-home">Home</a><a href="#s-supplies">Supplies</a><a href="#s-alerts">Alerts</a><a href="#s-wiki">Wiki</a>
     </nav>
     <!-- Shown when new data or a new app version is ready; applied by itself after 10 s without interaction. -->
     <button id="updPill" class="upd-pill hidden" type="button" aria-live="polite">🔄 Update available · tap to refresh</button>
@@ -144,6 +144,21 @@
         <div id="notesList" class="list"></div>
       </section>
 
+      <section id="s-ideas" class="sec">
+        <div class="section-head"><h2>💡 Ideas</h2><span id="ideaCount" class="pill">0</span></div>
+        <details id="ideaAdd" class="card-lite idea-add">
+          <summary><span class="title">＋ Add idea</span><span class="chev">›</span></summary>
+          <div class="idea-form">
+            <label for="ideaTitle" class="visually-hidden">Idea title</label>
+            <input id="ideaTitle" class="idea-input" type="text" maxlength="240" placeholder="Idea title" autocomplete="off" spellcheck="true">
+            <label for="ideaDetails" class="visually-hidden">Idea details</label>
+            <textarea id="ideaDetails" class="idea-text" rows="3" maxlength="4000" placeholder="Details (optional)" spellcheck="true"></textarea>
+            <div class="idea-edit-bar"><label for="ideaPriority" class="visually-hidden">Priority</label><select id="ideaPriority" class="idea-select"><option value="">No priority</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select><span id="ideaCounter" class="muted small" aria-live="polite">0/120</span><button id="addIdeaBtn" class="btn primary small" type="button" disabled>Add idea</button></div>
+          </div>
+        </details>
+        <div id="ideasList" class="list"></div>
+      </section>
+
       <section id="s-money" class="sec">
         <div class="section-head"><h2>💳 Money</h2></div>
         <div id="moneyList" class="list"></div>
@@ -197,6 +212,11 @@
             <div id="oldList" class="list"></div>
           </details>
         </div>
+      </section>
+
+      <section id="s-wiki" class="sec">
+        <div class="section-head"><h2>📖 Wiki</h2><span id="wikiBuilt" class="muted small"></span></div>
+        <div id="wikiBox" class="wiki"></div>
       </section>
 
       <section id="s-sync" class="card sec">

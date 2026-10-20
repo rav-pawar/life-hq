@@ -20,7 +20,7 @@
       <h1>Life HQ</h1>
     </a>
     <nav id="tabs" class="tabs hidden" aria-label="Sections">
-      <a href="#s-today">Today</a><a href="#s-money">Money</a><a href="#s-family">Family</a><a href="#s-festivals">Festivals</a><a href="#s-charging">Charging</a><a href="#s-home">Home</a><a href="#s-supplies">Supplies</a><a href="#s-alerts">Alerts</a>
+      <a href="#s-today">Today</a><a href="#s-notes">Notes</a><a href="#s-money">Money</a><a href="#s-family">Family</a><a href="#s-festivals">Festivals</a><a href="#s-charging">Charging</a><a href="#s-home">Home</a><a href="#s-supplies">Supplies</a><a href="#s-alerts">Alerts</a>
     </nav>
     <!-- Shown when new data or a new app version is ready; applied by itself after 10 s without interaction. -->
     <button id="updPill" class="upd-pill hidden" type="button" aria-live="polite">🔄 Update available · tap to refresh</button>
@@ -126,11 +126,25 @@
       <section id="s-today" class="sec">
         <div class="section-head"><h2>📅 Today</h2><span id="todayDate" class="muted small"></span></div>
         <div id="todayList" class="list"></div>
+        <div id="calendarBox" class="today-block hidden"></div>
+        <div id="todoBox" class="today-block hidden"></div>
+      </section>
+
+      <section id="s-notes" class="sec">
+        <div class="section-head"><h2>📝 Notes to self</h2><span id="noteCount" class="pill">0</span></div>
+        <div class="note-form">
+          <label for="noteInput" class="visually-hidden">New note</label>
+          <textarea id="noteInput" rows="2" maxlength="500" placeholder="Quick note… (synced to your other devices)" spellcheck="true" autocomplete="off"></textarea>
+          <div class="note-actions"><span id="noteCounter" class="muted small" aria-live="polite">0/500</span><button id="addNoteBtn" class="btn primary small" disabled>Add note</button></div>
+        </div>
+        <div id="notesList" class="list"></div>
       </section>
 
       <section id="s-money" class="sec">
         <div class="section-head"><h2>💳 Money</h2></div>
         <div id="moneyList" class="list"></div>
+        <h3 id="noticeHead" class="sub-head hidden">📬 From email</h3>
+        <div id="noticeList" class="list"></div>
       </section>
 
       <section id="s-family" class="sec">

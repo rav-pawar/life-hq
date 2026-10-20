@@ -7,7 +7,7 @@
   const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   let reg = null;
   // Version of this page's code; must equal CACHE in sw.js (bump both together). A different live sw.js = new code.
-  const APP_VERSION = 'life-hq-v12';
+  const APP_VERSION = 'life-hq-v13';
 
   // In-memory only. Plaintext data is never written to storage.
   const st = { env: null, device: null, data: null, overrides: {}, flashId: null, noData: false, lastSync: 0, offline: false, lastCheck: 0 };
@@ -94,7 +94,8 @@
     st.data = null;
     $('dash').classList.add('hidden');
     $('tabs').classList.add('hidden');
-    for (const id of ['todayList', 'moneyList', 'familyList', 'chargingList', 'weekendBox', 'homeList', 'suppliesList', 'urgentList', 'summaryList', 'infoList']) $(id).replaceChildren();
+    for (const id of ['todayList', 'calendarBox', 'todoBox', 'notesList', 'moneyList', 'noticeList', 'familyList', 'chargingList', 'weekendBox', 'homeList', 'suppliesList', 'urgentList', 'summaryList', 'infoList']) $(id).replaceChildren();
+    $('noteInput').value = '';
     $('syncJson').value = '';
     $('lock').classList.remove('hidden');
     $('lockMsg').textContent = msg || '';
@@ -175,6 +176,12 @@
     if (kind === 'charge') { const c = find((d.charging || {}).devices); return !c || (!!c.lastCharged && !!v.date && c.lastCharged >= v.date); }
     if (kind === 'supply') { const s = find((d.supplies || {}).items); return !s || ((s.status || 'ok') === v.status && (!v.lastBought || (!!s.lastBought && s.lastBought >= v.lastBought))); }
     if (kind === 'card' || kind === 'bill') { const m = find((d.money || {})[kind === 'card' ? 'cards' : 'bills']); return !m || (m.status || 'unpaid') === v.status; }
+    if (kind === 'notice') { const n = find((d.notices || {}).items); return !n || (n.status === 'done' ? 'done' : 'open') === v.status; }
+    if (kind === 'note') {
+      // Applied = the box has the note (add) or a tombstone for it (add or delete): a delete is never cleared before it lands.
+      const notes = d.notes || {}, gone = (notes.deleted || []).includes(id);
+      return v.op === 'delete' ? gone : (gone || !!find(notes.items));
+    }
     return true; // unknown kind: nothing to sync
   }
   async function loadOverrides() {
@@ -205,6 +212,8 @@
       else if (kind === 'charge') change = { type: 'charging.charged', id, date: v.date, at };
       else if (kind === 'supply') change = Object.assign({ type: 'supply.update', id, status: v.status, at }, v.lastBought ? { lastBought: v.lastBought } : {});
       else if (kind === 'card' || kind === 'bill') change = { type: kind + '.status', id, status: v.status, date: v.date, at };
+      else if (kind === 'notice') change = { type: 'notice.status', id, status: v.status, date: v.date, at };
+      else if (kind === 'note') change = v.op === 'delete' ? { type: 'note.delete', id, at } : { type: 'note.add', id, text: v.text, createdAt: v.createdAt, at };
       if (change) out.push({ key: k, v, change });
     }
     return out.sort((a, b) => a.change.at.localeCompare(b.change.at));
@@ -572,6 +581,58 @@
   }
   const sevCls = { urgent: 'urgent', warn: 'warn', info: '', past: 'past' };
 
+  // Expanded/collapsed state of details rows, remembered for this browser session (sessionStorage, ids only).
+  const OPEN_KEY = 'lhqOpen';
+  let openSet = null;
+  function getOpen() { if (!openSet) { try { openSet = new Set(JSON.parse(sessionStorage.getItem(OPEN_KEY) || '[]')); } catch (e) { openSet = new Set(); } } return openSet; }
+  function remember(det, key, defOpen) {
+    const set = getOpen();
+    det.open = set.has(key) ? true : set.has('!' + key) ? false : !!defOpen;
+    det.dataset.key = key;
+    det.addEventListener('toggle', () => {
+      set.delete(key); set.delete('!' + key);
+      if (det.open !== !!defOpen) set.add(det.open ? key : '!' + key);
+      try { sessionStorage.setItem(OPEN_KEY, JSON.stringify([...set].slice(-200))); } catch (e) { /* ignore */ }
+    });
+    return det;
+  }
+  function extLink(label, url, cls) {
+    const href = url && safeLink(url); if (!href) return null;
+    const a = el('a', cls || 'link', label); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; return a;
+  }
+  // "more ▸": extra details from the email behind an item (details.lines / links / source). Collapsed by default.
+  function moreDetails(d, key, skip) {
+    if (!d || typeof d !== 'object') return null;
+    const lines = (Array.isArray(d.lines) ? d.lines : []).filter(l => l && l.label && l.value != null && String(l.value) !== '' && !(skip && skip.test(String(l.label))));
+    const links = (Array.isArray(d.links) ? d.links : []).map(l => l && extLink(String(l.label || 'Open') + ' ↗', l.url, 'chip-link')).filter(Boolean);
+    const src = d.source && typeof d.source === 'object' ? d.source : null;
+    if (!lines.length && !links.length && !src) return null;
+    const det = remember(el('details', 'more'), 'more:' + key);
+    const sum = el('summary', 'more-sum'); sum.append(el('span', null, 'more'), el('span', 'chev', '▸'));
+    det.appendChild(sum);
+    if (lines.length) {
+      const dl = el('dl', 'kv');
+      lines.forEach(l => { dl.append(el('dt', null, String(l.label)), el('dd', null, String(l.value))); });
+      det.appendChild(dl);
+    }
+    if (links.length) { const r = el('div', 'chip-row'); links.forEach(a => r.appendChild(a)); det.appendChild(r); }
+    if (src) {
+      const p = el('p', 'muted small src');
+      const when = src.date ? L.fmtDate(String(src.date).slice(0, 10)) : '';
+      p.textContent = '📧 ' + [src.from, src.subject ? `“${src.subject}”` : '', when].filter(Boolean).join(' · ');
+      const a = extLink('Open email ↗', src.url); if (a) { p.appendChild(document.createTextNode(' · ')); p.appendChild(a); }
+      det.appendChild(p);
+    }
+    return det;
+  }
+  // "12:30–2:30 PM" (one AM/PM when both ends share it), else "11:30 AM–1:00 PM".
+  function timeRange(a, b) {
+    const A = L.fmtTime(a); if (!b || L.hhmmToMin(b) == null) return A;
+    const B = L.fmtTime(b), ma = A.slice(-2), mb = B.slice(-2);
+    return ma === mb ? A.slice(0, -3) + '–' + B : A + '–' + B;
+  }
+  const dayName = (today, ymd) => { const n = L.daysBetween(today, ymd); return n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : L.fmtDate(ymd); };
+
   function renderToday(now, today) {
     $('todayDate').textContent = L.fmtDate(today) + ' · ' + L.fmtTime(`${Math.floor(L.istMinutes(now) / 60)}:${String(L.istMinutes(now) % 60).padStart(2, '0')}`) + ' IST';
     const items = L.todayItems(st.data, st.overrides, now);
@@ -581,6 +642,112 @@
       return c;
     });
     $('todayList').replaceChildren(...(list.length ? list : [el('p', 'empty', 'Nothing due today. 🎉')]));
+    renderCalendar(now, today);
+    renderTodos(today);
+  }
+
+  // Calendar: today + next 2 days. More than 3 events: collapsed under a one-line summary.
+  function renderCalendar(now, today) {
+    const evs = L.calendarEvents(st.data, today, 3);
+    const box = $('calendarBox');
+    if (!evs.length) { box.replaceChildren(); box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    const nowMin = L.istMinutes(now);
+    const body = el('div', 'cal-days');
+    let lastDay = null, ul = null;
+    for (const e of evs) {
+      if (e.date !== lastDay) { lastDay = e.date; body.appendChild(el('p', 'cal-day', dayName(today, e.date))); ul = el('ul', 'cal-list'); body.appendChild(ul); }
+      const past = e.date === today && !e.allDay && L.hhmmToMin(e.end || e.start) != null && L.hhmmToMin(e.end || e.start) < nowMin;
+      const li = el('li', past ? 'past' : null);
+      li.appendChild(el('span', 'cal-time', e.allDay ? 'All day' : timeRange(e.start, e.end)));
+      const what = el('span', 'cal-what', e.title);
+      li.appendChild(what);
+      const meta = [e.location, e.calendar].filter(Boolean).join(' · ');
+      if (meta) li.appendChild(el('span', 'cal-meta', meta));
+      const a = extLink('↗', e.link, 'cal-link'); if (a) { a.setAttribute('aria-label', 'Open in Google Calendar'); li.appendChild(a); }
+      ul.appendChild(li);
+    }
+    const todayN = evs.filter(e => e.dayOffset === 0).length;
+    const later = evs.length - todayN;
+    const head = `📆 Calendar · ${todayN ? todayN + ' today' : 'no events today'}${later ? ` · ${later} more by ${L.fmtDate(L.addDays(today, 2)).split(' ')[0]}` : ''}`;
+    if (evs.length > 3) {
+      const det = remember(el('details', 'card-lite cal'), 'cal');
+      const s = el('summary'); s.append(el('span', 'block-title', head), el('span', 'chev', '›'));
+      det.append(s, body);
+      box.replaceChildren(det);
+    } else {
+      const c = el('div', 'card-lite cal'); c.append(el('p', 'block-title', head), body);
+      box.replaceChildren(c);
+    }
+  }
+
+  // To-do: open items only; the whole block is hidden when there are none.
+  function renderTodos(today) {
+    const items = L.todoItems(st.data, today);
+    const box = $('todoBox');
+    if (!items.length) { box.replaceChildren(); box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    const c = el('div', 'card-lite todo');
+    c.appendChild(el('p', 'block-title', `✅ To-do · ${items.length} open`));
+    const ul = el('ul', 'todo-list');
+    for (const t of items.slice(0, 20)) {
+      const li = el('li');
+      li.appendChild(el('span', 'todo-title', t.title));
+      if (t.due) li.appendChild(pill(t.overdue ? 'overdue' : t.daysLeft === 0 ? 'today' : t.daysLeft === 1 ? 'tomorrow' : L.fmtDate(t.due), t.overdue ? 'red' : t.daysLeft <= 1 ? 'amber' : 'blue'));
+      const a = extLink('Open ↗', t.link); if (a) li.appendChild(a);
+      ul.appendChild(li);
+    }
+    c.appendChild(ul);
+    if (items.length > 20) c.appendChild(el('p', 'muted small', `…and ${items.length - 20} more`));
+    box.replaceChildren(c);
+  }
+
+  // Notes to self: queued locally as note:<id> taps, synced through the inbox, published encrypted to every device.
+  function renderNotes() {
+    const notes = L.noteItems(st.data, st.overrides);
+    $('noteCount').textContent = String(notes.length);
+    const out = notes.map(n => {
+      const c = el('div', 'item note-item');
+      const top = el('div', 'row');
+      const left = el('div', 'grow');
+      left.appendChild(el('p', 'note-text', n.text));
+      const when = n.createdAt && Date.parse(n.createdAt) ? fmtIST(Date.parse(n.createdAt)) : '';
+      const m = el('p', 'sub', when);
+      if (n.pending) { m.appendChild(document.createTextNode(when ? ' · ' : '')); m.appendChild(pill(sync.sent['note:' + n.id] ? 'sent' : 'queued', sync.sent['note:' + n.id] ? 'blue' : 'amber')); }
+      left.appendChild(m);
+      top.appendChild(left);
+      const del = btn('Delete', 'ghost', () => deleteNote(n));
+      del.setAttribute('aria-label', 'Delete note: ' + n.text.slice(0, 40));
+      const r = el('div', 'right'); r.appendChild(del); top.appendChild(r);
+      c.appendChild(top);
+      return c;
+    });
+    $('notesList').replaceChildren(...(out.length ? out : [el('p', 'empty', 'No notes yet.')]));
+    updateNoteCounter();
+  }
+  function updateNoteCounter() {
+    const v = $('noteInput').value, n = v.trim().length;
+    $('noteCounter').textContent = `${v.length}/${L.NOTE_MAX}`;
+    $('noteCounter').classList.toggle('red-text', v.length > L.NOTE_MAX);
+    $('addNoteBtn').disabled = !n || v.length > L.NOTE_MAX;
+  }
+  function newNoteId() {
+    const r = new Uint8Array(6); crypto.getRandomValues(r);
+    return 'n-' + Date.now().toString(36) + Array.from(r, b => (b % 36).toString(36)).join('');
+  }
+  async function addNote() {
+    const text = L.cleanNoteText($('noteInput').value);
+    if (!text) { toast(`Notes are 1–${L.NOTE_MAX} characters`, true); return; }
+    $('noteInput').value = '';
+    await setLocal('note:' + newNoteId(), { op: 'add', text, createdAt: new Date().toISOString() });
+    toast('Note saved · syncing to your other devices');
+  }
+  async function deleteNote(n) {
+    if (!confirm('Delete this note on all devices?\n\n' + n.text.slice(0, 200))) return;
+    const key = 'note:' + n.id, v = st.overrides[key];
+    // Never left this device (queued, not sent): just drop it. Otherwise queue a delete for every device.
+    if (n.pending && v && v.op === 'add' && !sync.sent[key]) { await delLocal(key); return; }
+    await setLocal(key, { op: 'delete' });
   }
 
   function renderMoney(today) {
@@ -594,9 +761,39 @@
         [pill(paid ? 'paid' : 'unpaid', paid ? 'green' : (m.urgent ? 'red' : '')),
          m.paidLocally ? btn('Undo', 'ghost', () => delLocal(m.kind + ':' + m.id))
            : (!paid ? btn('Mark paid', 'done', () => setLocal(m.kind + ':' + m.id, { status: 'paid', date: today })) : null)]);
+      // The row already shows amount + due date: don't repeat them under "more".
+      const more = moreDetails(m.details, m.kind + ':' + m.id, /^(total( amount)? due|amount( due)?|due (by|date))$/i); if (more) c.appendChild(more);
       return c;
     });
     $('moneyList').replaceChildren(...(out.length ? out : [el('p', 'empty', 'No cards or bills.')]));
+    renderNotices(today);
+  }
+
+  // From email: payment links, toll tag, returns, refunds … (open first; done ones folded away).
+  const noticeWhen = n => n.daysLeft == null ? null : n.overdue ? `overdue by ${-n.daysLeft} day${n.daysLeft === -1 ? '' : 's'}` : n.daysLeft === 0 ? 'today' : L.relDays(n.daysLeft);
+  function noticeRow(n, today) {
+    const open = n.status === 'open';
+    const sub = [n.summary || null, n.dueDate ? `${n.dueLabel || 'Due'} ${L.fmtDate(n.dueDate)}${open ? ' (' + noticeWhen(n) + ')' : ''}` : null];
+    const c = row(!open ? 'past' : n.overdue || n.sev === 'urgent' ? 'urgent' : n.sev === 'warn' ? 'warn' : '', `${n.icon || '📬'} ${n.title}`, sub,
+      [pill(!open ? 'done' : n.overdue ? 'overdue' : n.pill || (n.sev === 'info' ? 'info' : 'to do'), !open ? 'green' : n.overdue || n.sev === 'urgent' ? 'red' : n.sev === 'warn' ? 'amber' : 'blue'),
+       n.doneLocally ? btn('Undo', 'ghost', () => delLocal('notice:' + n.id))
+         : open ? btn('Done ✓', 'done', () => setLocal('notice:' + n.id, { status: 'done', date: today })) : null]);
+    const more = moreDetails(n.details, 'notice:' + n.id); if (more) c.appendChild(more);
+    return c;
+  }
+  function renderNotices(today) {
+    const items = L.noticeItems(st.data, st.overrides, today);
+    const box = $('noticeList');
+    $('noticeHead').classList.toggle('hidden', !items.length);
+    const open = items.filter(n => n.status === 'open'), done = items.filter(n => n.status !== 'open');
+    const out = open.map(n => noticeRow(n, today));
+    if (done.length) {
+      const det = remember(el('details', 'old-group'), 'notices-done');
+      const s = el('summary'); s.append(el('span', 'muted small', `Done (${done.length})`), el('span', 'chev', '›'));
+      const l = el('div', 'list'); done.forEach(n => l.appendChild(noticeRow(n, today)));
+      det.append(s, l); out.push(det);
+    }
+    box.replaceChildren(...out);
   }
 
   function renderFamily(now, today) {
@@ -652,39 +849,45 @@
     $('chargingList').replaceChildren(...out);
   }
 
+  // Home maintenance: one summary card, then one collapsible row per appliance (collapsed by default).
+  const MAINT_PILL = { overdue: ['overdue', 'red'], due: ['due', 'amber'], upcoming: ['upcoming', 'blue'], done: ['done', 'green'], never: ['never logged', 'grey'] };
+  function maintPill(status, n, label) { const [t, c] = MAINT_PILL[status]; return pill(n != null ? `${n} ${label || t}` : t, c); }
   function renderHome(today) {
-    const wk = L.maintenanceWeekend(st.data, st.overrides, today);
-    const box = el('div', 'card weekend' + (wk.isToday ? ' urgent' : ''));
-    const d = L.daysBetween(today, wk.date);
-    box.appendChild(el('h3', null, `${wk.isToday ? '🚨 ' : ''}🗓️ Maintenance weekend: ${L.fmtDate(wk.date)} (${L.relDays(d)})`));
-    box.appendChild(el('p', 'muted small', `Every other Saturday. ${wk.tasks.length} task${wk.tasks.length === 1 ? '' : 's'} due by ${L.fmtDate(wk.until)}:`));
-    const ul = el('ul', 'tasks');
-    wk.tasks.forEach(t => ul.appendChild(el('li', t.overdue ? 'red' : null, `${t.appliance}: ${t.name}` + (t.unknown ? ' (never logged)' : ` (${t.overdue ? 'overdue' : 'due ' + L.fmtDate(t.nextDue)})`))));
-    if (!wk.tasks.length) ul.appendChild(el('li', null, 'Nothing due. 🎉'));
-    box.appendChild(ul);
+    const ov = L.maintenanceOverview(st.data, st.overrides, today);
+    const box = el('div', 'card weekend' + (ov.isToday && ov.dueCount ? ' urgent' : ''));
+    const c = ov.counts;
+    box.appendChild(el('h3', null, `${ov.isToday && ov.dueCount ? '🚨 ' : '🗓️ '}Maintenance weekend ${L.fmtDate(ov.date)} (${L.relDays(ov.daysUntil)})`));
+    box.appendChild(el('p', 'weekend-line', `${ov.dueCount} due · ${c.done} done · ${c.upcoming} upcoming`));
+    // Breakdown of the "due" number only (done / upcoming are already in the line above).
+    const chips = el('div', 'chip-row');
+    for (const [s, label] of [['overdue'], ['due', 'due by Sat'], ['never']]) if (c[s]) chips.appendChild(maintPill(s, c[s], label));
+    if (chips.childNodes.length) box.appendChild(chips);
+    box.appendChild(el('p', 'muted small', `Every other Saturday · ${ov.total} tasks on ${ov.appliances.length} appliances`));
     $('weekendBox').replaceChildren(box);
 
-    const tasks = L.maintenanceTasks(st.data, st.overrides, today);
-    const groups = new Map();
-    tasks.forEach(t => { if (!groups.has(t.appliance)) groups.set(t.appliance, []); groups.get(t.appliance).push(t); });
-    const order = ((st.data.maintenance || {}).appliances || []).map(a => a.name);
-    const out = [];
-    for (const name of order) {
-      const list = groups.get(name) || [];
-      const g = el('div', 'group');
-      g.appendChild(el('h3', null, name));
-      list.forEach(t => {
-        const sub = [`Every ${t.everyDays} days · last done ${t.lastDone ? L.fmtDate(t.lastDone) : 'unknown'}`,
-          `Next: ${L.fmtDate(t.nextDue)} (${t.unknown ? 'next maintenance weekend' : (t.overdue ? 'overdue ' + (-t.daysLeft) + 'd' : L.relDays(t.daysLeft))})`];
-        g.appendChild(row(t.doneLocally ? 'past' : (t.overdue ? 'urgent' : (t.daysLeft <= 0 ? 'warn' : '')), (t.overdue && !t.doneLocally ? '🚨 ' : '') + t.name, sub,
-          t.doneLocally ? [pill('✓ done today', 'green'), btn('Undo', 'ghost', () => delLocal('maint:' + t.id))]
-            : btn('Done today', 'done', () => setLocal('maint:' + t.id, { lastDone: today }))));
+    const out = ov.appliances.map(ap => {
+      const det = remember(el('details', 'appl'), 'appl:' + ap.id);
+      const s = el('summary', 'appl-sum');
+      s.appendChild(el('span', 'appl-icon', ap.icon));
+      const name = el('span', 'appl-name'); name.append(el('span', 'appl-title', ap.name), el('span', 'appl-count', `${ap.tasks.length} task${ap.tasks.length === 1 ? '' : 's'}`));
+      s.appendChild(name);
+      const worst = ap.counts[ap.status];
+      s.appendChild(maintPill(ap.status, ap.tasks.length ? worst : null));
+      s.appendChild(el('span', 'chev', '›'));
+      det.appendChild(s);
+      const list = el('div', 'list appl-tasks');
+      ap.tasks.forEach(t => {
+        const when = t.unknown ? 'next maintenance weekend' : t.overdue ? `overdue ${-t.daysLeft}d` : L.relDays(t.daysLeft);
+        const sub = [`Every ${t.everyDays} days · ${t.lastDone ? 'last done ' + L.fmtDate(t.lastDone) : 'not logged yet'}`, `Next: ${L.fmtDate(t.nextDue)} (${when})`];
+        list.appendChild(row('task ' + (t.status === 'done' ? 'past' : t.status === 'overdue' ? 'urgent' : ''), t.name, sub,
+          [maintPill(t.status), t.doneLocally ? btn('Undo', 'ghost', () => delLocal('maint:' + t.id))
+            : btn('Done today', 'done', () => setLocal('maint:' + t.id, { lastDone: today }))]));
       });
-      out.push(g);
-    }
-    $('homeList').replaceChildren(...out);
+      det.appendChild(list);
+      return det;
+    });
+    $('homeList').replaceChildren(...(out.length ? out : [el('p', 'empty', 'No appliances tracked.')]));
   }
-
 
   function renderFestivals(today) {
     const active = L.activeFestivals(st.data, today);
@@ -709,7 +912,7 @@
         const ul = el('ul', 'fest-trivia');
         trivia.forEach(tr => {
           const li = el('li', null, tr.text);
-          if (tr.eveningHint) {
+          if (tr.eveningHint && !/evening/i.test(tr.text)) { // no "(after evening)" when the text already says so
             li.appendChild(document.createTextNode(' '));
             li.appendChild(el('span', 'hint', '(after evening)'));
           }
@@ -757,6 +960,9 @@
     const d = st.data || {}, find = list => (list || []).find(x => x && x.id === c.id) || {};
     if (c.type === 'maintenance.done') { const t = find(((d.maintenance || {}).appliances || []).flatMap(a => a.tasks || [])); return `Done: ${t.name || c.id}`; }
     if (c.type === 'charging.charged') return `Charged: ${find((d.charging || {}).devices).name || c.id}`;
+    if (c.type === 'notice.status') return `${c.status === 'done' ? 'Done' : 'Reopened'}: ${find((d.notices || {}).items).title || c.id}`;
+    if (c.type === 'note.add') return 'Note: ' + (String(c.text || '').length > 40 ? String(c.text).slice(0, 40) + '…' : c.text);
+    if (c.type === 'note.delete') return 'Delete note: ' + ((find((d.notes || {}).items).text || c.id).slice(0, 40));
     if (c.type === 'supply.update') return `${c.lastBought ? 'Bought' : c.status === 'out' ? 'Out' : c.status === 'low' ? 'Low' : 'OK'}: ${find((d.supplies || {}).items).name || c.id}`;
     const m = find((d.money || {})[c.type === 'card.status' ? 'cards' : 'bills']);
     return `${c.status === 'paid' ? 'Paid' : 'Unpaid'}: ${m.label || m.pushLabel || c.id}`;
@@ -786,12 +992,12 @@
     await loadOverrides();
     if (st.data) {
       const now = nowMs(), today = L.istDate(now);
-      const parts = [() => renderToday(now, today), () => renderMoney(today), () => renderFamily(now, today), () => renderFestivals(today),
+      const parts = [() => renderToday(now, today), renderNotes, () => renderMoney(today), () => renderFamily(now, today), () => renderFestivals(today),
         () => renderCharging(now, today), () => renderHome(today), () => renderSupplies(today), renderSync];
       for (const p of parts) { try { p(); } catch (e) { console.error(e); banner('⚠️ Some data could not be shown: ' + e.message); } }
     }
     $('s-today').classList.toggle('hidden', !st.data);
-    for (const id of ['s-money', 's-family', 's-festivals', 's-charging', 's-home', 's-supplies', 's-sync']) $(id).classList.toggle('hidden', !st.data);
+    for (const id of ['s-notes', 's-money', 's-family', 's-festivals', 's-charging', 's-home', 's-supplies', 's-sync']) $(id).classList.toggle('hidden', !st.data);
     await renderAlerts();
     updateSyncInfo();
   }
@@ -1049,6 +1255,9 @@
     $('clearBtn').addEventListener('click', clearOld);
     $('clearBtn2').addEventListener('click', clearOld);
     $('dismissOldBtn').addEventListener('click', dismissAllOld);
+    $('noteInput').addEventListener('input', updateNoteCounter);
+    $('noteInput').addEventListener('keydown', ev => { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); if (!$('addNoteBtn').disabled) addNote(); } });
+    $('addNoteBtn').addEventListener('click', addNote);
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('message', ev => {
         const d = ev.data || {};

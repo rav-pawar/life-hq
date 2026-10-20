@@ -190,3 +190,59 @@ details summary::after { content: ""; display: block; clear: both; }
 #s-sync { margin-top: 22px; }
 #s-sync textarea { margin: 8px 0; }
 .item.next-school { border-left: 5px solid var(--blue); }
+
+/* ---- v13: pills, "more ▸" details, calendar / to-do blocks, notes, maintenance rows ---- */
+.pill.grey { background: #2a2e3b; color: #b7bdcc; }
+.pill.red { background: #4a161b; color: #ffb3b3; }
+#urgentCount.pill.red { background: var(--red); color: #fff; }
+.red-text { color: #ff9a9a; }
+.visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.chip-link { display: inline-block; color: #cfe0ff; background: #16284a; border: 1px solid #2f5596; border-radius: 999px; padding: 4px 10px; font-size: .85rem; text-decoration: none; }
+.chip-link:hover { border-color: var(--blue); }
+details.more { margin-top: 8px; }
+details.more > summary.more-sum { display: inline-flex; gap: 4px; align-items: center; color: #8fb6ff; font-size: .88rem; padding: 2px 0; }
+details.more > summary .chev { float: none; display: inline-block; }
+details.more[open] > summary .chev { transform: rotate(90deg); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; margin: 8px 0 4px; font-size: .9rem; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.src { margin: 6px 0 0; overflow-wrap: anywhere; }
+.sub-head { font-size: .95rem; margin: 16px 2px 8px; }
+.today-block { margin-top: 10px; }
+.card-lite { background: var(--card); border: 1px solid #262a38; border-radius: var(--radius); padding: 12px 14px; }
+.card-lite > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.block-title { font-weight: 600; margin: 0; }
+.cal-day { margin: 10px 0 4px; font-size: .82rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.cal-list, .todo-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.cal-list li { display: grid; grid-template-columns: minmax(6.6em, max-content) 1fr auto; gap: 2px 10px; align-items: baseline; font-size: .92rem; }
+.cal-list li.past { opacity: .5; }
+.cal-time { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+.cal-what { min-width: 0; overflow-wrap: anywhere; }
+.cal-meta { grid-column: 2 / 3; color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+.cal-link { grid-column: 3; grid-row: 1; color: #8fb6ff; text-decoration: none; padding: 0 4px; }
+.todo-list li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: .92rem; }
+.todo-title { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
+.note-form { background: var(--card); border: 1px solid #262a38; border-radius: var(--radius); padding: 10px; margin-bottom: 10px; }
+.note-form textarea { font: inherit; font-size: .95rem; color: var(--text); word-break: normal; overflow-wrap: anywhere; min-height: 3.2em; margin: 0; }
+.note-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.btn:disabled { opacity: .5; cursor: default; }
+.note-text { margin: 0 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.note-item { padding: 10px 12px; }
+.note-item .sub .pill { margin-left: 2px; font-size: .75rem; }
+.weekend-line { margin: 6px 0 0; font-weight: 600; }
+details.appl { background: var(--card); border: 1px solid #262a38; border-radius: var(--radius); }
+details.appl > summary.appl-sum { display: flex; align-items: center; gap: 10px; padding: 12px 14px; min-height: 48px; border-radius: var(--radius); }
+details.appl > summary:focus-visible, details.more > summary:focus-visible, .card-lite > summary:focus-visible, .old-group > summary:focus-visible { outline: 2px solid #8fb6ff; outline-offset: 2px; }
+.appl-icon { font-size: 1.3rem; width: 1.6em; text-align: center; flex: none; }
+.appl-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.appl-title { font-weight: 600; overflow-wrap: anywhere; }
+.appl-count { color: var(--muted); font-size: .82rem; }
+details.appl > summary .pill { flex: none; white-space: nowrap; }
+details.appl > summary .chev { float: none; flex: none; }
+.appl-tasks { padding: 0 10px 10px; gap: 8px; }
+.appl-tasks .item { background: var(--card2); padding: 10px 12px; }
+.appl-tasks .item.urgent { background: var(--red-bg); }
+.item.task .right { gap: 8px; }
+/* The v12 clearfix ::after would become a flex item and push the chevron off the right edge. */
+.card-lite > summary::after, details.appl > summary::after, details.more > summary::after { content: none; display: none; }

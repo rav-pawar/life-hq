@@ -78,9 +78,14 @@
         if (o && isYMD(o.lastDone) && (!lastDone || o.lastDone > lastDone)) lastDone = o.lastDone;
         const nextDue = lastDone ? addDays(lastDone, t.everyDays) : weekend;
         const daysLeft = daysBetween(today, nextDue);
+        const doneLocally = !!(o && o.lastDone === today);
+        // status: done (tapped today, or done since the previous maintenance weekend and not due again by the coming one),
+        // never (no lastDone), overdue, due (by the coming maintenance weekend), upcoming (later).
+        const status = doneLocally ? 'done' : !lastDone ? 'never' : daysLeft < 0 ? 'overdue' : nextDue <= weekend ? 'due'
+          : lastDone >= addDays(weekend, -settingsOf(data).mw.everyDays) ? 'done' : 'upcoming';
         out.push({ appliance: ap.name, applianceId: ap.id, id: t.id, name: t.name, everyDays: t.everyDays,
           lastDone, unknown: !lastDone, nextDue, daysLeft, overdue: daysLeft < 0, dueToday: daysLeft === 0,
-          doneLocally: !!(o && o.lastDone === today) });
+          doneLocally, status });
       }
     }
     return out.sort((a, b) => a.nextDue.localeCompare(b.nextDue) || a.appliance.localeCompare(b.appliance));
@@ -92,6 +97,36 @@
     const until = addDays(date, s.mw.lookaheadDays - 1);
     const tasks = maintenanceTasks(data, overrides, today).filter(t => t.nextDue <= until && !t.doneLocally);
     return { date, until, tasks, isToday: date === today };
+  }
+
+  // Maintenance overview for the Home section: summary counts + one entry per appliance (worst status first in pill).
+  const MAINT_STATUS_ORDER = ['overdue', 'due', 'never', 'upcoming', 'done'];
+  const APPLIANCE_ICONS = [
+    [/air ?purifier/i, '🌬️'], [/dish ?washer/i, '🍽️'], [/fridge|refrigerator/i, '🧊'], [/chim|\bhob\b|stove/i, '🔥'],
+    [/vacuum|mop/i, '🧹'], [/\bac\b|air ?condition/i, '❄️'], [/washing|washer|dryer/i, '🧺'], [/water ?purifier|\bro\b|filter jug/i, '💧'],
+    [/geyser|water heater/i, '🚿'], [/microwave|oven|otg/i, '♨️'], [/\btv\b|television/i, '📺'], [/fan\b/i, '🌀'],
+    [/inverter|ups|battery/i, '🔋'], [/car\b|bike|scooter|vehicle/i, '🚗'], [/plant|garden/i, '🪴'], [/smoke|alarm|detector/i, '🚨']
+  ];
+  function applianceIcon(ap) {
+    if (ap && typeof ap.icon === 'string' && ap.icon.trim()) return ap.icon.trim();
+    const s = `${(ap && ap.name) || ''} ${(ap && ap.id) || ''}`.replace(/-/g, ' ');
+    for (const [re, icon] of APPLIANCE_ICONS) if (re.test(s)) return icon;
+    return '🔧';
+  }
+  function maintenanceOverview(data, overrides, today) {
+    const date = nextMaintenanceSaturday(data, today);
+    const tasks = maintenanceTasks(data, overrides, today);
+    const count = list => { const c = { overdue: 0, due: 0, never: 0, upcoming: 0, done: 0 }; list.forEach(t => { c[t.status]++; }); return c; };
+    const rank = t => MAINT_STATUS_ORDER.indexOf(t.status);
+    const appliances = ((data.maintenance || {}).appliances || []).map(ap => {
+      const list = tasks.filter(t => t.applianceId === ap.id).sort((a, b) => rank(a) - rank(b) || a.nextDue.localeCompare(b.nextDue));
+      const counts = count(list);
+      return { id: ap.id, name: ap.name, icon: applianceIcon(ap), tasks: list, counts,
+        status: list.length ? MAINT_STATUS_ORDER.find(s => counts[s] > 0) : 'done' };
+    });
+    const counts = count(tasks);
+    return { date, isToday: date === today, daysUntil: daysBetween(today, date), total: tasks.length, counts,
+      dueCount: counts.overdue + counts.due + counts.never, appliances };
   }
 
   // ---- Money ----
@@ -177,6 +212,57 @@
     });
   }
 
+  // ---- Email notices (payment links, toll tag, returns, refunds …), filled by the morning routine from Gmail ----
+  function noticeItems(data, overrides, today) {
+    return ((((data || {}).notices) || {}).items || []).filter(n => n && n.id && n.title).map(n => {
+      const o = freshOverride(data, overrides, 'notice:' + n.id);
+      const status = o && o.status ? o.status : (n.status === 'done' ? 'done' : 'open');
+      const daysLeft = isYMD(n.dueDate) ? daysBetween(today, n.dueDate) : null;
+      const sev = ['urgent', 'warn', 'info'].includes(n.sev) ? n.sev : 'info';
+      return Object.assign({}, n, { status, sev, daysLeft, doneLocally: !!(o && o.status === 'done'),
+        overdue: status === 'open' && daysLeft != null && daysLeft < 0 });
+    }).sort((a, b) => (a.status === 'done') - (b.status === 'done') || String(a.dueDate || '9999').localeCompare(String(b.dueDate || '9999')) || String(a.date || '').localeCompare(String(b.date || '')));
+  }
+
+  // ---- Calendar (today + next days; filled by the morning routine from Google Calendar) ----
+  // All-day events that only repeat an active festival day (e.g. a public-holiday calendar entry) are dropped.
+  function calendarEvents(data, today, days) {
+    const until = addDays(today, (days || 3) - 1);
+    const festLabels = d => activeFestivals(data, d).map(i => `${i.fest.name} ${i.label}`.toLowerCase());
+    return ((((data || {}).calendar) || {}).events || []).filter(e => e && e.title && isYMD(e.date) && e.date >= today && e.date <= until)
+      .filter(e => !(e.allDay && festLabels(e.date).some(l => l.includes(String(e.title).toLowerCase()))))
+      .map(e => Object.assign({}, e, { allDay: !!e.allDay || hhmmToMin(e.start) == null, dayOffset: daysBetween(today, e.date) }))
+      .sort((a, b) => a.date.localeCompare(b.date) || (a.allDay === b.allDay ? 0 : a.allDay ? -1 : 1) || String(a.start || '').localeCompare(String(b.start || '')));
+  }
+
+  // ---- To-dos (generic; the source app is filled in by the morning routine) ----
+  function todoItems(data, today) {
+    return ((((data || {}).todos) || {}).items || []).filter(t => t && t.title && !t.done).map(t => {
+      const daysLeft = isYMD(t.due) ? daysBetween(today, t.due) : null;
+      return Object.assign({}, t, { daysLeft, overdue: daysLeft != null && daysLeft < 0 });
+    }).sort((a, b) => String(a.due || '9999').localeCompare(String(b.due || '9999')) || String(a.title).localeCompare(String(b.title)));
+  }
+
+  // ---- Notes to self (synced through the inbox as note.add / note.delete) ----
+  const NOTE_MAX = 500;
+  const NOTE_ID_RE = /^n-[a-z0-9]{6,40}$/;
+  function cleanNoteText(t) {
+    if (typeof t !== 'string') return null;
+    const s = t.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, '').trim();
+    return s && s.length <= NOTE_MAX ? s : null;
+  }
+  // Data notes + this device's pending adds, minus pending deletes. Newest first.
+  function noteItems(data, overrides) {
+    const out = new Map();
+    for (const n of ((((data || {}).notes) || {}).items || [])) if (n && NOTE_ID_RE.test(n.id) && typeof n.text === 'string') out.set(n.id, Object.assign({}, n, { pending: false }));
+    for (const [k, v] of Object.entries(overrides || {})) {
+      if (!k.startsWith('note:') || !v) continue;
+      const id = k.slice(5);
+      if (v.op === 'add' && !out.has(id) && !((((data || {}).notes) || {}).deleted || []).includes(id)) out.set(id, { id, text: v.text, createdAt: v.createdAt, pending: true });
+      else if (v.op === 'delete') out.delete(id);
+    }
+    return [...out.values()].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  }
 
   // ---- Festivals ----
   const UPCOMING_FESTIVAL_DAYS = 21;
@@ -201,6 +287,18 @@
     };
   }
 
+  // Drop a lead-in that only repeats the day label: label "Day A · Day B", text "Day B · Day A: people …"
+  // -> "People …". Compares the '·' / '/' separated parts, case-insensitive, in any order.
+  function dedupeLead(label, text) {
+    const t = String(text || ''), m = /^([^:—–]{2,80})[:—–]\s*/.exec(t);
+    if (!label || !m) return t;
+    const parts = x => x.split(/[·/|,]/).map(p => p.trim().toLowerCase()).filter(Boolean);
+    const lab = new Set(parts(String(label))), lead = parts(m[1]);
+    if (!lead.length || !lead.every(p => lab.has(p))) return t;
+    const rest = t.slice(m[0].length);
+    return rest ? rest.charAt(0).toUpperCase() + rest.slice(1) : t;
+  }
+
   function festivalTriviaToday(fest, today) {
     if (!fest || !isYMD(today)) return [];
     const info = festivalDayInfo(fest, today);
@@ -209,7 +307,7 @@
     // Day-specific observables first (days[].observe), then festival trivia.
     const named = (fest.days || []).find(d => d && d.date === today);
     (named && Array.isArray(named.observe) ? named.observe : []).forEach((text, i) => {
-      if (typeof text === 'string' && text.trim()) out.push({ id: `${fest.id || 'fest'}-${today}-obs${i}`, text, when: 'day', eveningHint: false });
+      if (typeof text === 'string' && text.trim()) out.push({ id: `${fest.id || 'fest'}-${today}-obs${i}`, text: dedupeLead(named.label, text), when: 'day', eveningHint: false });
     });
     for (const t of (fest.trivia || [])) {
       if (!t || !t.text) continue;
@@ -251,7 +349,9 @@
     }
     const noSchool = noSchoolReason(data, today);
     if (noSchool && noSchool.kind === 'holiday' && schoolDays(data).includes(weekdayOf(today)) && ((data.school || {}).runs || []).length) {
-      out.push({ sev: 'info', section: 'family', text: `🥳 No school today: ${noSchool.name}` });
+      // The festival line below already names the day: don't repeat its label here.
+      const isFestLabel = activeFestivals(data, today).some(i => i.label === noSchool.name);
+      out.push({ sev: 'info', section: 'family', text: isFestLabel ? '🥳 No school today (festival holiday)' : `🥳 No school today: ${noSchool.name}` });
     }
     if (schoolDay(data, today)) {
       for (const r of ((data.school || {}).runs || [])) {
@@ -275,9 +375,16 @@
     for (const it of supplyItems(data, overrides, today).filter(i => i.flagged)) {
       out.push({ sev: it.status === 'out' ? 'urgent' : 'warn', section: 'supplies', text: `${it.name}: ${it.status === 'out' ? 'out' : it.status === 'low' ? 'low' : 'running low soon'}` });
     }
+    for (const n of noticeItems(data, overrides, today)) {
+      if (n.status !== 'open' || n.sev === 'info' && !n.overdue) continue;
+      if (n.daysLeft != null && n.daysLeft > 1) continue;
+      const when = n.daysLeft == null ? '' : n.daysLeft < 0 ? ` · overdue by ${-n.daysLeft} day${n.daysLeft === -1 ? '' : 's'}` : n.daysLeft === 0 ? ' · today' : ' · tomorrow';
+      const sev = n.overdue || n.daysLeft === 0 ? 'urgent' : 'warn';
+      out.push({ sev, section: 'money', text: `${sev === 'urgent' ? '' : (n.icon || '📬') + ' '}${n.title}${when}` }); // urgent rows get 🚨 only
+    }
     for (const info of activeFestivals(data, today)) {
       const trivia = festivalTriviaToday(info.fest, today);
-      const tip = trivia.length ? ' · ' + trivia[0].text : '';
+      const tip = trivia.length ? ' · ' + dedupeLead(info.label, trivia[0].text) : '';
       out.push({ sev: 'info', section: 'festivals', text: `${info.fest.emoji || '🎉'} ${info.fest.name}: ${info.label}${tip}` });
     }
     const rank = { urgent: 0, warn: 1, info: 2, past: 3 };
@@ -331,7 +438,8 @@
   }
 
   g.LifeLogic = { istDate, istMinutes, istWeekday, addDays, daysBetween, weekdayOf, hhmmToMin, fmtTime, fmtDate, relDays, isYMD,
-    settingsOf, nextMaintenanceSaturday, isMaintenanceSaturday, maintenanceTasks, maintenanceWeekend, moneyItems, schoolDay, holidayEntry, holidayDates, noSchoolReason, nextSchoolDay,
+    settingsOf, nextMaintenanceSaturday, isMaintenanceSaturday, maintenanceTasks, maintenanceWeekend, maintenanceOverview, applianceIcon, moneyItems,
+    noticeItems, calendarEvents, todoItems, noteItems, cleanNoteText, NOTE_MAX, NOTE_ID_RE, dedupeLead, schoolDay, holidayEntry, holidayDates, noSchoolReason, nextSchoolDay,
     chargingDevices, supplyItems, festivalDayInfo, festivalTriviaToday, activeFestivals, upcomingFestivals,
     todayItems, dueAlerts, sensitiveReason };
   if (typeof module === 'object' && module.exports) module.exports = g.LifeLogic;

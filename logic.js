@@ -154,8 +154,12 @@
   function chargingDevices(data, overrides, today) {
     const ch = data.charging || {};
     return (ch.devices || []).map(d => {
+      // Charged today = a tap on this device today, or a synced lastCharged (merged from any device) of today (IST).
       const o = overrides && overrides['charge:' + d.id];
-      return Object.assign({}, d, { reminderTime: d.reminderTime || ch.defaultReminderTime || '21:30', chargedToday: !!(o && o.date === today) });
+      const chargedLocally = !!(o && o.date === today);
+      const chargedSynced = d.lastCharged === today;
+      return Object.assign({}, d, { reminderTime: d.reminderTime || ch.defaultReminderTime || '21:30',
+        chargedToday: chargedLocally || chargedSynced, chargedLocally, chargedSynced });
     });
   }
 
@@ -293,7 +297,7 @@
         }
       }
     }
-    for (const d of chargingDevices(data, {}, today)) {
+    for (const d of chargingDevices(data, {}, today).filter(x => !x.chargedToday)) {
       const t = hhmmToMin(d.reminderTime);
       if (t != null && nowMin >= t) alerts.push({ key: 'charge:' + d.id, group: 'charging', type: 'info', item: d.name });
     }

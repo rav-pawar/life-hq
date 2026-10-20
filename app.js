@@ -646,7 +646,7 @@
     const out = L.chargingDevices(st.data, st.overrides, today).map(d => {
       const due = !d.chargedToday && nowMin >= L.hhmmToMin(d.reminderTime);
       return row(d.chargedToday ? 'past' : (due ? 'urgent' : ''), `${d.icon || '🔋'} ${d.name}`, `Reminder ${L.fmtTime(d.reminderTime)} daily`,
-        d.chargedToday ? [pill('✓ charged', 'green'), btn('Undo', 'ghost', () => delLocal('charge:' + d.id))]
+        d.chargedToday ? [pill('✓ charged', 'green'), d.chargedLocally ? btn('Undo', 'ghost', () => delLocal('charge:' + d.id)) : null]
           : btn('Charged ✓', 'done', () => setLocal('charge:' + d.id, { date: today })));
     });
     $('chargingList').replaceChildren(...out);

@@ -337,6 +337,11 @@ details.todo-fold[open] > summary { margin-bottom: 6px; }
 .todo-upcoming { margin: 8px 0 0; overflow-wrap: anywhere; }
 .todo-right .btn.small { padding: 3px 9px; font-size: .78rem; }
 
+/* v20: health item time at the start of the title line */
+.todo-title-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.todo-time { flex: 0 0 auto; min-width: 4.8em; color: var(--muted); font-size: .8rem; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.todo-title-text { min-width: 0; overflow-wrap: anywhere; }
+
 /* v18: daily health plan (Today block + To-do Health plan group) */
 .health-day > summary .grow { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 4px; }
 .health-day > summary .todo-title { flex: none; }

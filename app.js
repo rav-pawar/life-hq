@@ -7,7 +7,7 @@
   const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   let reg = null;
   // Version of this page's code; must equal CACHE in sw.js (bump both together). A different live sw.js = new code.
-  const APP_VERSION = 'life-hq-v19';
+  const APP_VERSION = 'life-hq-v20';
 
   // In-memory only. Plaintext data is never written to storage.
   const st = { env: null, device: null, data: null, overrides: {}, flashId: null, noData: false, lastSync: 0, offline: false, lastCheck: 0 };
@@ -775,7 +775,13 @@
   function todoLi(t, opts) {
     const x = el('li', 'todo-item' + (t.done ? ' done' : '') + (t.sub ? ' sub' : ''));
     const mid = el('div', 'todo-main');
-    const title = el(t.tickable ? 'label' : 'span', 'todo-title', t.title);
+    const title = el(t.tickable ? 'label' : 'span', 'todo-title');
+    const timeText = t.source === 'health' && opts && opts.time ? opts.time : '';
+    if (timeText) {
+      const line = el('span', 'todo-title-line');
+      line.append(el('span', 'todo-time', timeText), el('span', 'todo-title-text', t.title));
+      title.appendChild(line);
+    } else title.textContent = t.title;
     if (t.tickable) {
       const cb = el('input', 'todo-cb'); cb.type = 'checkbox'; cb.checked = t.done; cb.id = 'tdc-' + (++todoSeq);
       cb.setAttribute('aria-label', (t.done ? 'Reopen: ' : 'Mark done: ') + t.title);
@@ -803,7 +809,7 @@
     return x;
   }
   // v18: daily health plan (source 'health'). Today only ever shows today's items; the To-do tab groups every day.
-  function healthSubtitle(t) {
+  function healthTime(t) {
     return t.time && L.hhmmToMin(t.time) != null ? L.fmtTime(t.time) : '';
   }
   function renderHealthToday(today) {
@@ -818,7 +824,7 @@
     go.addEventListener('click', () => scrollToSection('s-todos', true));
     head.appendChild(go); c.appendChild(head);
     const ul = el('ul', 'todo-list');
-    for (const t of items) ul.appendChild(todoLi(t, { compact: true, hideDue: true, subtitle: healthSubtitle(t) }));
+    for (const t of items) ul.appendChild(todoLi(t, { compact: true, hideDue: true, time: healthTime(t) }));
     c.appendChild(ul);
     box.replaceChildren(c);
   }
@@ -834,7 +840,7 @@
     c.appendChild(head);
     if (items.length) {
       const ul = el('ul', 'todo-list');
-      for (const t of items) ul.appendChild(todoLi(t, { dismiss: true, hideDue: true, subtitle: healthSubtitle(t) }));
+      for (const t of items) ul.appendChild(todoLi(t, { dismiss: true, hideDue: true, time: healthTime(t) }));
       c.appendChild(ul);
     } else c.appendChild(el('p', 'muted small todo-ro', 'Nothing planned today.'));
     const others = days.filter(d => d.date !== today && d.items.length);
@@ -850,7 +856,7 @@
         ds.append(left, el('span', 'pill blue', `${d.done}/${d.total} done`), el('span', 'chev', '›'));
         const body = el('div', 'todo-fold-body');
         const ul = el('ul', 'todo-list');
-        for (const t of d.items) ul.appendChild(todoLi(t, { dismiss: true, hideDue: true, subtitle: healthSubtitle(t) }));
+        for (const t of d.items) ul.appendChild(todoLi(t, { dismiss: true, hideDue: true, time: healthTime(t) }));
         body.appendChild(ul);
         det.append(ds, body); wrap.appendChild(det);
       }
@@ -860,7 +866,7 @@
       const det = remember(el('details', 'more-rows'), 'todo-dis:health');
       const ds = el('summary'); ds.append(el('span', 'muted', `Dismissed (${dismissed.length})`), el('span', 'chev', '›'));
       const ul = el('ul', 'todo-list');
-      for (const t of dismissed) ul.appendChild(todoLi(t, { compact: true, dismiss: true, hideDue: true, subtitle: healthSubtitle(t) }));
+      for (const t of dismissed) ul.appendChild(todoLi(t, { compact: true, dismiss: true, hideDue: true, time: healthTime(t) }));
       det.append(ds, ul); c.appendChild(det);
     }
     out.push(c);

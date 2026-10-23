@@ -36,8 +36,9 @@ site served by GitHub Pages.
    the Alerts tab; the Android app deliberately keeps the TWA/Web Push path.
 8. **Android app:** it lives in the private repo's `android/` folder. It is a TWA plus a native
    widget; no Android code belongs here. TWA assetlinks must be at the **origin root**
-   `https://rav-pawar.github.io/.well-known/assetlinks.json` — this repo's Pages root is
-   `/life-hq/`, so it cannot serve that file. The root file lives in `rav-pawar/rav-pawar.github.io`.
+   `https://rav-pawar.github.io/.well-known/assetlinks.json` - this repo's Pages root is
+   `/life-hq/`, so it cannot serve that file. It is live in `rav-pawar/rav-pawar.github.io`
+   (verification-only, no personal data).
 9. **Tests:** `node tests/smoke.mjs` must pass. For Android/data changes also run the checks in the
    private repo (`node tools/test-android-vector.js`, the Gradle unit tests).
 

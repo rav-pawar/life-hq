@@ -41,8 +41,8 @@ The native Android app (TWA + home-screen widget) lives in the private repo unde
 opens this site in a Trusted Web Activity and reads the same `data.enc.json` with its own enrolled
 widget key. No Android code or personal data belongs in this repo.
 
-TWA verification requires `https://rav-pawar.github.io/.well-known/assetlinks.json` — the **origin
-root**, not a path inside this repo. That file lives in the small public `rav-pawar.github.io`
+TWA verification uses `https://rav-pawar.github.io/.well-known/assetlinks.json` — the **origin
+root**, not a path inside this repo. It is live in the tiny public `rav-pawar/rav-pawar.github.io`
 user-site repo; the `life-hq` repo cannot serve it because its Pages root is `/life-hq/`.
 
 ## Do not commit

@@ -498,7 +498,7 @@ body.view-health #s-health .section-head { display: none; }
 
 .hmove { border-bottom: 1px solid #232838; padding: 9px 0; }
 .hmove:last-child { border-bottom: 0; }
-.hmove summary { display: flex; justify-content: space-between; gap: 10px; cursor: pointer; list-style: none; }
+.hmove summary { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 10px; cursor: pointer; list-style: none; width: 100%; }
 .hmove summary::-webkit-details-marker { display: none; }
 .hmove-name { font-weight: 600; font-size: .93rem; }
 .hmove-dose { color: var(--muted); font-size: .75rem; text-align: right; }

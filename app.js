@@ -322,12 +322,12 @@
     const queued = pendingEntries().filter(e => !(sync.sent[e.key] && sync.sent[e.key].at === e.v.at)).length;
     let t;
     if (!syncReady()) t = 'Automatic sync is not configured in this build; use Copy changes.';
-    else if (!token) t = sync.autoOff ? 'Automatic sync is off on this device (âš™ï¸ Settings â†’ Use automatic sync), or use Copy changes.' : 'Automatic sync is not connected yet (it connects with the next data update), or use Copy changes.';
-    else if (sync.lastError) t = 'âš ï¸ Sync failed: ' + sync.lastError + (queued ? ' Â· will retry' : '');
-    else if (queued) t = navigator.onLine ? `Sending ${queued} change${queued === 1 ? '' : 's'} shortlyâ€¦` : `Offline: ${queued} queued, will send when back online`;
-    else t = sync.lastOk ? 'Automatic sync on Â· last sent ' + hm(sync.lastOk) + ' IST' : 'Automatic sync on';
+    else if (!token) t = sync.autoOff ? 'Automatic sync is off on this device (⚙️ Settings → Use automatic sync), or use Copy changes.' : 'Automatic sync is not connected yet (it connects with the next data update), or use Copy changes.';
+    else if (sync.lastError) t = '⚠️ Sync failed: ' + sync.lastError + (queued ? ' · will retry' : '');
+    else if (queued) t = navigator.onLine ? `Sending ${queued} change${queued === 1 ? '' : 's'} shortly…` : `Offline: ${queued} queued, will send when back online`;
+    else t = sync.lastOk ? 'Automatic sync on · last sent ' + hm(sync.lastOk) + ' IST' : 'Automatic sync on';
     $('syncState').textContent = t;
-    $('tokenState').textContent = token ? (sync.source === 'auto' ? 'connected automatically âœ“' : 'connected (manual token) âœ“')
+    $('tokenState').textContent = token ? (sync.source === 'auto' ? 'connected automatically ✓' : 'connected (manual token) ✓')
       : sync.autoOff ? 'off on this device' : 'not connected yet';
     $('tokenForm').classList.toggle('hidden', !!token);
     $('removeTokenBtn').classList.toggle('hidden', !token);
@@ -372,14 +372,14 @@
     $('saveTokenBtn').addEventListener('click', async () => {
       const t = $('tokenInput').value.trim();
       if (!/^(github_pat_|ghp_|gho_)[A-Za-z0-9_]{20,}$/.test(t)) { $('syncStatus').textContent = 'That does not look like a GitHub token (it starts with github_pat_).'; return; }
-      $('syncStatus').textContent = 'Checking the tokenâ€¦';
+      $('syncStatus').textContent = 'Checking the token…';
       let ok = false;
-      try { const r = await ghFetch('GET', '', t); ok = r.ok; if (!ok) $('syncStatus').textContent = 'âš ï¸ ' + httpMsg(r.status) + '. Not saved.'; }
-      catch (e) { $('syncStatus').textContent = 'âš ï¸ Could not reach GitHub (' + e.message + '). Not saved.'; }
+      try { const r = await ghFetch('GET', '', t); ok = r.ok; if (!ok) $('syncStatus').textContent = '⚠️ ' + httpMsg(r.status) + '. Not saved.'; }
+      catch (e) { $('syncStatus').textContent = '⚠️ Could not reach GitHub (' + e.message + '). Not saved.'; }
       if (!ok) return;
       await saveToken(t, 'manual'); await setAutoOff(false); $('tokenInput').value = '';
       sync.lastError = '';
-      $('syncStatus').textContent = 'Token saved âœ“ (encrypted on this device). Tap Test sync to check end to end.';
+      $('syncStatus').textContent = 'Token saved ✓ (encrypted on this device). Tap Test sync to check end to end.';
       if (st.data) renderSync(); else renderSyncState();
       scheduleSync(500);
     });
@@ -393,13 +393,13 @@
       await setAutoOff(false);
       if (sync.source === 'manual') await removeToken(); // back to the token delivered with the data
       await provisionToken();
-      $('syncStatus').textContent = (await getToken()) ? 'Automatic sync on âœ“' : 'Automatic sync on; it connects with the next data update.';
+      $('syncStatus').textContent = (await getToken()) ? 'Automatic sync on ✓' : 'Automatic sync on; it connects with the next data update.';
       if (st.data) renderSync(); else renderSyncState();
     });
     $('testSyncBtn').addEventListener('click', async () => {
-      $('syncStatus').textContent = 'Sending an encrypted testâ€¦';
+      $('syncStatus').textContent = 'Sending an encrypted test…';
       const n = await syncNow({ test: true });
-      $('syncStatus').textContent = n ? `âœ“ Test sync sent${n > 0 ? ' (issue #' + n + ')' : ''}. Your assistant's box will mark it applied on its next inbox run.` : 'âš ï¸ Test sync failed: ' + (sync.lastError || 'not ready');
+      $('syncStatus').textContent = n ? `✓ Test sync sent${n > 0 ? ' (issue #' + n + ')' : ''}. Your assistant's box will mark it applied on its next inbox run.` : '⚠️ Test sync failed: ' + (sync.lastError || 'not ready');
     });
     addEventListener('online', () => scheduleSync(1000));
   }
@@ -489,7 +489,7 @@
     if (!prev) { await openDashboard(); toast('Updated just now'); return true; }
     await renderPreserving();
     const nApplied = sync.justApplied || 0; sync.justApplied = 0;
-    if (nApplied) toast(`Updated Â· ${nApplied} change${nApplied === 1 ? '' : 's'} applied`);
+    if (nApplied) toast(`Updated · ${nApplied} change${nApplied === 1 ? '' : 's'} applied`);
     else if (prev.updatedAt !== st.data.updatedAt || envFp(prevEnv) !== envFp(env)) toast('Updated just now');
     document.body.dataset.refreshed = String(Date.now()); // marker for the headless test
     return true;
@@ -638,15 +638,15 @@
     const href = url && safeLink(url); if (!href) return null;
     const a = el('a', cls || 'link', label); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; return a;
   }
-  // "more â–¸": extra details from the email behind an item (details.lines / links / source). Collapsed by default.
+  // "more ▸": extra details from the email behind an item (details.lines / links / source). Collapsed by default.
   function moreDetails(d, key, skip) {
     if (!d || typeof d !== 'object') return null;
     const lines = (Array.isArray(d.lines) ? d.lines : []).filter(l => l && l.label && l.value != null && String(l.value) !== '' && !(skip && skip.test(String(l.label))));
-    const links = (Array.isArray(d.links) ? d.links : []).map(l => l && extLink(String(l.label || 'Open') + ' â†—', l.url, 'chip-link')).filter(Boolean);
+    const links = (Array.isArray(d.links) ? d.links : []).map(l => l && extLink(String(l.label || 'Open') + ' ↗', l.url, 'chip-link')).filter(Boolean);
     const src = d.source && typeof d.source === 'object' ? d.source : null;
     if (!lines.length && !links.length && !src) return null;
     const det = remember(el('details', 'more'), 'more:' + key);
-    const sum = el('summary', 'more-sum'); sum.append(el('span', null, 'more'), el('span', 'chev', 'â–¸'));
+    const sum = el('summary', 'more-sum'); sum.append(el('span', null, 'more'), el('span', 'chev', '▸'));
     det.appendChild(sum);
     if (lines.length) {
       const dl = el('dl', 'kv');
@@ -657,26 +657,26 @@
     if (src) {
       const p = el('p', 'muted small src');
       const when = src.date ? L.fmtDate(String(src.date).slice(0, 10)) : '';
-      p.textContent = 'ðŸ“§ ' + [src.from, src.subject ? `â€œ${src.subject}â€` : '', when].filter(Boolean).join(' Â· ');
-      const a = extLink('Open email â†—', src.url); if (a) { p.appendChild(document.createTextNode(' Â· ')); p.appendChild(a); }
+      p.textContent = '📧 ' + [src.from, src.subject ? `“${src.subject}”` : '', when].filter(Boolean).join(' · ');
+      const a = extLink('Open email ↗', src.url); if (a) { p.appendChild(document.createTextNode(' · ')); p.appendChild(a); }
       det.appendChild(p);
     }
     return det;
   }
-  // "12:30â€“2:30 PM" (one AM/PM when both ends share it), else "11:30 AMâ€“1:00 PM".
+  // "12:30–2:30 PM" (one AM/PM when both ends share it), else "11:30 AM–1:00 PM".
   function timeRange(a, b) {
     const A = L.fmtTime(a); if (!b || L.hhmmToMin(b) == null) return A;
     const B = L.fmtTime(b), ma = A.slice(-2), mb = B.slice(-2);
-    return ma === mb ? A.slice(0, -3) + 'â€“' + B : A + 'â€“' + B;
+    return ma === mb ? A.slice(0, -3) + '–' + B : A + '–' + B;
   }
   const dayName = (today, ymd) => { const n = L.daysBetween(today, ymd); return n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : L.fmtDate(ymd); };
 
   function renderToday(now, today) {
-    $('todayDate').textContent = L.fmtDate(today) + ' Â· ' + L.fmtTime(`${Math.floor(L.istMinutes(now) / 60)}:${String(L.istMinutes(now) % 60).padStart(2, '0')}`) + ' IST';
+    $('todayDate').textContent = L.fmtDate(today) + ' · ' + L.fmtTime(`${Math.floor(L.istMinutes(now) / 60)}:${String(L.istMinutes(now) % 60).padStart(2, '0')}`) + ' IST';
     const items = L.todayItems(st.data, st.overrides, now);
     const list = items.map(i => {
       if (i.section === 'festivals' && i.lines && i.lines.length) return festivalTip(i, today);
-      const c = row(sevCls[i.sev], (i.sev === 'urgent' ? 'ðŸš¨ ' : '') + i.text);
+      const c = row(sevCls[i.sev], (i.sev === 'urgent' ? '🚨 ' : '') + i.text);
       c.classList.add('compact'); c.addEventListener('click', () => $('s-' + i.section).scrollIntoView({ behavior: 'smooth' }));
       return c;
     });
@@ -689,12 +689,12 @@
       const rest = foldIdx.map(k => list[k]);
       for (const k of foldIdx.reverse()) list.splice(k, 1);
       const det = remember(el('details', 'more-rows'), 'today-more');
-      const s = el('summary', null); s.append(el('span', null, `${rest.length} more today`), el('span', 'chev', 'â€º'));
+      const s = el('summary', null); s.append(el('span', null, `${rest.length} more today`), el('span', 'chev', '›'));
       const inner = el('div', 'list'); inner.append(...rest);
       det.append(s, inner);
       list.push(det);
     }
-    $('todayList').replaceChildren(...(list.length ? list : [el('p', 'empty', 'Nothing due today. ðŸŽ‰')]));
+    $('todayList').replaceChildren(...(list.length ? list : [el('p', 'empty', 'Nothing due today. 🎉')]));
     renderCalendar(now, today);
     renderTodos(today);
     renderHealthToday(today);
@@ -707,10 +707,10 @@
     const s = el('summary');
     const left = el('div', 'grow');
     left.append(el('p', 'title', i.text), el('p', 'sub teaser', i.lines[0]));
-    s.append(left, el('span', 'tip-count muted small', i.lines.length > 1 ? `${i.lines.length} tips` : 'tip'), el('span', 'chev', 'â€º'));
+    s.append(left, el('span', 'tip-count muted small', i.lines.length > 1 ? `${i.lines.length} tips` : 'tip'), el('span', 'chev', '›'));
     const ul = el('ul', 'fest-lines');
     for (const t of i.lines) ul.appendChild(el('li', null, t));
-    const go = el('button', 'btn small ghost', 'Festivals â€º'); go.type = 'button';
+    const go = el('button', 'btn small ghost', 'Festivals ›'); go.type = 'button';
     go.addEventListener('click', () => $('s-festivals').scrollIntoView({ behavior: 'smooth' }));
     det.append(s, ul, go);
     return det;
@@ -732,17 +732,17 @@
       li.appendChild(el('span', 'cal-time', e.allDay ? 'All day' : timeRange(e.start, e.end)));
       const what = el('span', 'cal-what', e.title);
       li.appendChild(what);
-      const meta = [e.location, e.calendar].filter(Boolean).join(' Â· ');
+      const meta = [e.location, e.calendar].filter(Boolean).join(' · ');
       if (meta) li.appendChild(el('span', 'cal-meta', meta));
-      const a = extLink('â†—', e.link, 'cal-link'); if (a) { a.setAttribute('aria-label', 'Open in Google Calendar'); li.appendChild(a); }
+      const a = extLink('↗', e.link, 'cal-link'); if (a) { a.setAttribute('aria-label', 'Open in Google Calendar'); li.appendChild(a); }
       ul.appendChild(li);
     }
     const todayN = evs.filter(e => e.dayOffset === 0).length;
     const later = evs.length - todayN;
-    const head = `ðŸ“† Calendar Â· ${todayN ? todayN + ' today' : 'no events today'}${later ? ` Â· ${later} more by ${L.fmtDate(L.addDays(today, 2)).split(' ')[0]}` : ''}`;
+    const head = `📆 Calendar · ${todayN ? todayN + ' today' : 'no events today'}${later ? ` · ${later} more by ${L.fmtDate(L.addDays(today, 2)).split(' ')[0]}` : ''}`;
     if (evs.length > 3) {
       const det = remember(el('details', 'card-lite cal'), 'cal');
-      const s = el('summary'); s.append(el('span', 'block-title', head), el('span', 'chev', 'â€º'));
+      const s = el('summary'); s.append(el('span', 'block-title', head), el('span', 'chev', '›'));
       det.append(s, body);
       box.replaceChildren(det);
     } else {
@@ -753,15 +753,15 @@
 
   // ---- To-dos (v15) ----
   // Google Tasks items are READ-ONLY here (shown with an "open in Google Tasks" link); Life HQ's own to-dos from email
-  // (source 'email': card dues, society maintenance, electricity â€¦) and the daily health plan (source 'health', v18)
+  // (source 'email': card dues, society maintenance, electricity …) and the daily health plan (source 'health', v18)
   // have a tick that queues todo:<id> through the inbox (todo.done / todo.undone; the box only updates its data, never
   // Google). Optimistic like notes.
-  const dueTxt = t => t.overdue ? (t.daysLeft === -1 ? 'overdue Â· yesterday' : `overdue Â· ${-t.daysLeft} days`) : t.daysLeft === 0 ? 'today' : t.daysLeft === 1 ? 'tomorrow' : L.fmtDate(t.due);
+  const dueTxt = t => t.overdue ? (t.daysLeft === -1 ? 'overdue · yesterday' : `overdue · ${-t.daysLeft} days`) : t.daysLeft === 0 ? 'today' : t.daysLeft === 1 ? 'tomorrow' : L.fmtDate(t.due);
   function reconnectNote(v, short) {
     if (!v.authExpired) return null;
     const since = v.authExpiredAt ? ` (since ${fmtIST(Date.parse(v.authExpiredAt))})` : '';
-    return el('p', 'todo-warn small', short ? 'âš ï¸ Google Tasks needs re-connecting: showing the last synced list.'
-      : `âš ï¸ Google Tasks needs re-connecting${since}. Showing the last synced list; ask your assistant to reconnect it.`);
+    return el('p', 'todo-warn small', short ? '⚠️ Google Tasks needs re-connecting: showing the last synced list.'
+      : `⚠️ Google Tasks needs re-connecting${since}. Showing the last synced list; ask your assistant to reconnect it.`);
   }
   async function tickTodo(t, checked) {
     const key = 'todo:' + t.id;
@@ -770,14 +770,14 @@
     // Back to the published state before anything left this device: just drop the tap. Already sent: send the reverse.
     if (checked === base && !sync.sent[key]) await delLocal(key);
     else await setLocal(key, { done: checked });
-    toast(checked ? 'Marked done Â· syncing' : 'Reopened Â· syncing');
+    toast(checked ? 'Marked done · syncing' : 'Reopened · syncing');
   }
   // v16: Dismiss / Restore (email to-dos: tododis:<id>; email notices: noticedis:<id>). Optimistic; back to the
   // published state before anything was sent just drops the tap.
   async function setDismiss(kind, id, base, dismissed, label) {
     const key = kind + ':' + id;
     if (dismissed === base && !sync.sent[key]) await delLocal(key); else await setLocal(key, { dismissed });
-    toast((dismissed ? 'Dismissed' : 'Restored') + (label ? ': ' + label.slice(0, 40) : '') + ' Â· syncing');
+    toast((dismissed ? 'Dismissed' : 'Restored') + (label ? ': ' + label.slice(0, 40) : '') + ' · syncing');
   }
   const todoBaseDismissed = id => !!((((st.data || {}).todos || {}).items || []).find(x => x && x.id === id) || {}).dismissed;
   const noticeBaseDismissed = id => (((((st.data || {}).notices || {}).items || []).find(x => x && x.id === id)) || {}).status === 'dismissed';
@@ -799,18 +799,18 @@
       cb.addEventListener('change', () => tickTodo(t, cb.checked));
       title.htmlFor = cb.id;
       x.appendChild(cb);
-    } else { const d = el('span', 'todo-dot', t.done ? 'âœ“' : t.sub ? 'â†³' : 'â—‹'); d.setAttribute('aria-hidden', 'true'); x.appendChild(d); }
+    } else { const d = el('span', 'todo-dot', t.done ? '✓' : t.sub ? '↳' : '○'); d.setAttribute('aria-hidden', 'true'); x.appendChild(d); }
     mid.appendChild(title);
     const listName = t.source === 'email' ? 'Bills & dues' : t.source === 'health' ? 'Health plan' : t.list || 'Google Tasks';
     const meta = [opts && opts.subtitle ? opts.subtitle : null, opts && opts.showList ? listName : null,
       !(opts && opts.compact) ? t.notes : null].filter(Boolean);
-    if (meta.length) mid.appendChild(el('span', 'todo-notes', meta.join(' Â· ')));
+    if (meta.length) mid.appendChild(el('span', 'todo-notes', meta.join(' · ')));
     x.appendChild(mid);
     const r = el('div', 'todo-right');
     if (!t.done && t.due && !(opts && opts.hideDue)) r.appendChild(pill(dueTxt(t), t.overdue ? 'red' : t.daysLeft <= 1 ? 'amber' : 'blue'));
     if (t.doneLocally) r.appendChild(pill(sync.sent['todo:' + t.id] ? 'sent' : 'queued', sync.sent['todo:' + t.id] ? 'blue' : 'amber'));
     else if (t.dismissedLocally) r.appendChild(pill(sync.sent['tododis:' + t.id] ? 'sent' : 'queued', sync.sent['tododis:' + t.id] ? 'blue' : 'amber'));
-    const a = extLink('â†—', t.link, 'cal-link');
+    const a = extLink('↗', t.link, 'cal-link');
     if (a) { const gt = t.source === 'google-tasks'; a.setAttribute('aria-label', gt ? 'Open in Google Tasks: ' + t.title : 'Open link: ' + t.title); a.title = gt ? 'Open in Google Tasks' : 'Open'; r.appendChild(a); }
     if (opts && opts.dismiss && t.tickable) {
       const b = btn(t.dismissed ? 'Restore' : 'Dismiss', 'ghost small', () => setDismiss('tododis', t.id, todoBaseDismissed(t.id), !t.dismissed, t.title));
@@ -830,8 +830,8 @@
     box.classList.remove('hidden');
     const c = el('div', 'card-lite todo health-today');
     const head = el('div', 'todo-head');
-    head.appendChild(el('p', 'block-title', 'ðŸ©º Health today'));
-    const go = el('button', 'btn small ghost', 'Health plan â€º'); go.type = 'button';
+    head.appendChild(el('p', 'block-title', '🩺 Health today'));
+    const go = el('button', 'btn small ghost', 'Health plan ›'); go.type = 'button';
     go.addEventListener('click', () => scrollToSection('s-todos', true));
     head.appendChild(go); c.appendChild(head);
     const ul = el('ul', 'todo-list');
@@ -839,7 +839,7 @@
     c.appendChild(ul);
     box.replaceChildren(c);
   }
-  // To-do tab: "ðŸ©º Health plan" (today, expanded) first, then "Rest of the plan" (one collapsed row per other day).
+  // To-do tab: "🩺 Health plan" (today, expanded) first, then "Rest of the plan" (one collapsed row per other day).
   function renderHealthGroup(today, out) {
     const days = L.healthByDay(st.data, st.overrides, today);
     if (!days.length) return;
@@ -847,7 +847,7 @@
     const dismissed = days.flatMap(d => d.dismissed);
     const c = el('div', 'card-lite todo-group health-group');
     const head = el('div', 'todo-head');
-    head.append(el('p', 'block-title', 'ðŸ©º Health plan'), el('span', 'muted small', 'daily plan Â· tick when done'));
+    head.append(el('p', 'block-title', '🩺 Health plan'), el('span', 'muted small', 'daily plan · tick when done'));
     c.appendChild(head);
     if (items.length) {
       const ul = el('ul', 'todo-list');
@@ -857,14 +857,14 @@
     const others = days.filter(d => d.date !== today && d.items.length);
     if (others.length) {
       const rest = remember(el('details', 'more-rows health-rest'), 'health-rest', false, true);
-      const rs = el('summary'); rs.append(el('span', null, 'Rest of the plan'), el('span', 'chev', 'â€º'));
+      const rs = el('summary'); rs.append(el('span', null, 'Rest of the plan'), el('span', 'chev', '›'));
       const wrap = el('div');
       for (const d of others) {
         const det = remember(el('details', 'todo-fold health-day'), 'health-day:' + d.date, false, true);
         const ds = el('summary');
         const left = el('div', 'grow');
-        left.append(el('span', 'todo-title', L.fmtDate(d.date)), el('span', 'todo-notes', d.theme ? ' Â· ' + d.theme : ''));
-        ds.append(left, el('span', 'pill blue', `${d.done}/${d.total} done`), el('span', 'chev', 'â€º'));
+        left.append(el('span', 'todo-title', L.fmtDate(d.date)), el('span', 'todo-notes', d.theme ? ' · ' + d.theme : ''));
+        ds.append(left, el('span', 'pill blue', `${d.done}/${d.total} done`), el('span', 'chev', '›'));
         const body = el('div', 'todo-fold-body');
         const ul = el('ul', 'todo-list');
         for (const t of d.items) ul.appendChild(todoLi(t, { dismiss: true, hideDue: true, time: healthTime(t) }));
@@ -875,7 +875,7 @@
     }
     if (dismissed.length) {
       const det = remember(el('details', 'more-rows'), 'todo-dis:health');
-      const ds = el('summary'); ds.append(el('span', 'muted', `Dismissed (${dismissed.length})`), el('span', 'chev', 'â€º'));
+      const ds = el('summary'); ds.append(el('span', 'muted', `Dismissed (${dismissed.length})`), el('span', 'chev', '›'));
       const ul = el('ul', 'todo-list');
       for (const t of dismissed) ul.appendChild(todoLi(t, { compact: true, dismiss: true, hideDue: true, time: healthTime(t) }));
       det.append(ds, ul); c.appendChild(det);
@@ -930,8 +930,8 @@
     const c = el('div', 'card-lite todo');
     const head = el('div', 'todo-head');
     const od = items.filter(t => t.overdue).length;
-    head.appendChild(el('p', 'block-title', items.length ? `âœ… To-do Â· ${items.length - od ? (items.length - od) + ' due today' : ''}${od && items.length - od ? ' Â· ' : ''}${od ? od + ' overdue' : ''}` : 'âœ… To-do Â· nothing due today'));
-    const go = el('button', 'btn small ghost', 'All to-dos â€º'); go.type = 'button';
+    head.appendChild(el('p', 'block-title', items.length ? `✅ To-do · ${items.length - od ? (items.length - od) + ' due today' : ''}${od && items.length - od ? ' · ' : ''}${od ? od + ' overdue' : ''}` : '✅ To-do · nothing due today'));
+    const go = el('button', 'btn small ghost', 'All to-dos ›'); go.type = 'button';
     go.addEventListener('click', () => scrollToSection('s-todos', true));
     head.appendChild(go); c.appendChild(head);
     if (warn) c.appendChild(warn);
@@ -941,7 +941,7 @@
     if (items.length) c.appendChild(ul);
     if (items.length > shown) {
       const det = remember(el('details', 'more-rows'), 'todo-more');
-      const s = el('summary'); s.append(el('span', null, `${items.length - shown} more`), el('span', 'chev', 'â€º'));
+      const s = el('summary'); s.append(el('span', null, `${items.length - shown} more`), el('span', 'chev', '›'));
       const ul2 = el('ul', 'todo-list');
       for (const t of items.slice(shown)) ul2.appendChild(todoLi(t, { showList: true, compact: true }));
       det.append(s, ul2); c.appendChild(det);
@@ -949,8 +949,8 @@
     // Coming up in the next few days (one muted line, like the calendar's "more by" hint).
     if (up.length) {
       const days = L.settingsOf(st.data).todoUpcomingDays;
-      const names = up.slice(0, 3).map(t => `${t.title} (${t.daysLeft === 1 ? 'tomorrow' : L.fmtDate(t.due).split(' ')[0]})`).join(' Â· ');
-      c.appendChild(el('p', 'todo-upcoming muted small', `Upcoming in ${days} days: ${names}${up.length > 3 ? ` Â· +${up.length - 3} more` : ''}`));
+      const names = up.slice(0, 3).map(t => `${t.title} (${t.daysLeft === 1 ? 'tomorrow' : L.fmtDate(t.due).split(' ')[0]})`).join(' · ');
+      c.appendChild(el('p', 'todo-upcoming muted small', `Upcoming in ${days} days: ${names}${up.length > 3 ? ` · +${up.length - 3} more` : ''}`));
     }
     box.replaceChildren(c);
   }
@@ -967,17 +967,17 @@
       // (name + open count) that opens on tap; the open/closed state is kept on this device.
       const collapsible = g.source === 'google-tasks' && !g.primary;
       const c = collapsible ? remember(el('details', 'card-lite todo-group todo-fold'), 'todo-list:' + g.key, false, true) : el('div', 'card-lite todo-group');
-      const titleTxt = `${g.source === 'email' ? 'ðŸ“§' : 'ðŸ—‚ï¸'} ${g.title} Â· ${g.open.length ? g.open.length + ' open' : 'nothing open'}`;
+      const titleTxt = `${g.source === 'email' ? '📧' : '🗂️'} ${g.title} · ${g.open.length ? g.open.length + ' open' : 'nothing open'}`;
       if (collapsible) {
-        const s = el('summary'); s.append(el('span', 'block-title', titleTxt), el('span', 'chev', 'â€º'));
+        const s = el('summary'); s.append(el('span', 'block-title', titleTxt), el('span', 'chev', '›'));
         c.appendChild(s);
       } else {
         const head = el('div', 'todo-head');
-        head.append(el('p', 'block-title', titleTxt), el('span', 'muted small', g.source === 'email' ? 'from email Â· tick when done' : 'Google Tasks Â· read-only'));
+        head.append(el('p', 'block-title', titleTxt), el('span', 'muted small', g.source === 'email' ? 'from email · tick when done' : 'Google Tasks · read-only'));
         c.appendChild(head);
       }
       const body = collapsible ? el('div', 'todo-fold-body') : c;
-      if (collapsible) { body.appendChild(el('p', 'muted small todo-ro', 'Google Tasks Â· read-only')); c.appendChild(body); }
+      if (collapsible) { body.appendChild(el('p', 'muted small todo-ro', 'Google Tasks · read-only')); c.appendChild(body); }
       const rowOpts = { dismiss: g.source === 'email' };
       if (g.open.length) {
         const ul = el('ul', 'todo-list');
@@ -986,7 +986,7 @@
         body.appendChild(ul);
         if (g.open.length > shown) {
           const det = remember(el('details', 'more-rows'), 'todo-more:' + g.key);
-          const s = el('summary'); s.append(el('span', null, `${g.open.length - shown} more`), el('span', 'chev', 'â€º'));
+          const s = el('summary'); s.append(el('span', null, `${g.open.length - shown} more`), el('span', 'chev', '›'));
           const ul2 = el('ul', 'todo-list'); for (const t of g.open.slice(shown)) ul2.appendChild(todoLi(t, rowOpts));
           det.append(s, ul2); body.appendChild(det);
         }
@@ -994,7 +994,7 @@
       for (const [list, label, key, opts] of [[g.done, 'Done', 'todo-done:', { compact: true }], [g.dismissed || [], 'Dismissed', 'todo-dis:', { compact: true, dismiss: true }]]) {
         if (!list.length) continue;
         const det = remember(el('details', 'more-rows'), key + g.key);
-        const s = el('summary'); s.append(el('span', 'muted', `${label} (${list.length})`), el('span', 'chev', 'â€º'));
+        const s = el('summary'); s.append(el('span', 'muted', `${label} (${list.length})`), el('span', 'chev', '›'));
         const ul2 = el('ul', 'todo-list'); for (const t of list) ul2.appendChild(todoLi(t, opts));
         det.append(s, ul2); body.appendChild(det);
       }
@@ -1018,7 +1018,7 @@
       c.dataset.id = n.id;
       const when = n.createdAt && Date.parse(n.createdAt) ? fmtIST(Date.parse(n.createdAt)) : '';
       const m = el('p', 'sub', when);
-      if (n.pending) { m.appendChild(document.createTextNode(when ? ' Â· ' : '')); m.appendChild(pill(sync.sent['note:' + n.id] ? 'sent' : 'queued', sync.sent['note:' + n.id] ? 'blue' : 'amber')); }
+      if (n.pending) { m.appendChild(document.createTextNode(when ? ' · ' : '')); m.appendChild(pill(sync.sent['note:' + n.id] ? 'sent' : 'queued', sync.sent['note:' + n.id] ? 'blue' : 'amber')); }
       if (noteEdit && noteEdit.id === n.id) { c.classList.add('editing'); c.append(noteEditor(n), m); return c; }
       const top = el('div', 'row');
       const left = el('div', 'grow');
@@ -1078,7 +1078,7 @@
   }
   async function saveEdit(n) {
     const text = L.cleanNoteText(noteEdit ? noteEdit.text : '');
-    if (!text) { toast(`Notes are 1â€“${L.NOTE_MAX} characters`, true); return; }
+    if (!text) { toast(`Notes are 1–${L.NOTE_MAX} characters`, true); return; }
     const id = n.id, key = 'note:' + id, v = st.overrides[key];
     noteEdit = null;
     if (text === n.text) { renderNotes(); return; }
@@ -1086,7 +1086,7 @@
     if (v && v.op === 'add' && !sync.sent[key]) await setLocal(key, { op: 'add', text, createdAt: v.createdAt });
     else await setLocal(key, { op: 'edit', text, createdAt: n.createdAt || (v && v.createdAt) || null });
     const b = document.querySelector(`#notesList .note-item[data-id="${id}"] .note-btns button`); if (b) b.focus({ preventScroll: true });
-    toast('Note updated Â· syncing to your other devices');
+    toast('Note updated · syncing to your other devices');
   }
   function updateNoteCounter() {
     const v = $('noteInput').value, n = v.trim().length;
@@ -1100,12 +1100,12 @@
   }
   async function addNote() {
     const text = L.cleanNoteText($('noteInput').value);
-    if (!text) { toast(`Notes are 1â€“${L.NOTE_MAX} characters`, true); return; }
+    if (!text) { toast(`Notes are 1–${L.NOTE_MAX} characters`, true); return; }
     $('noteInput').value = '';
     await setLocal('note:' + newNoteId(), { op: 'add', text, createdAt: new Date().toISOString() });
-    toast('Note saved Â· syncing to your other devices');
+    toast('Note saved · syncing to your other devices');
   }
-  // Delete: hide now, show "Deleted Â· Undo" for ~6 s, then queue. A newer delete commits the older one at once.
+  // Delete: hide now, show "Deleted · Undo" for ~6 s, then queue. A newer delete commits the older one at once.
   function deleteNote(n) {
     commitAllDeletes();
     if (noteEdit && noteEdit.id === n.id) noteEdit = null;
@@ -1189,14 +1189,14 @@
     if (it.details) {
       if (it.details.length > 220) {
         const det = el('details', 'more idea-more');
-        const sum = el('summary', 'more-sum'); sum.append(el('span', 'idea-teaser', it.details.slice(0, 160).replace(/\s+\S*$/, '') + 'â€¦'), el('span', 'chev', 'â€º'));
+        const sum = el('summary', 'more-sum'); sum.append(el('span', 'idea-teaser', it.details.slice(0, 160).replace(/\s+\S*$/, '') + '…'), el('span', 'chev', '›'));
         det.append(sum, el('p', 'idea-details', it.details));
         remember(det, 'idea:' + it.id, false);
         c.appendChild(det);
       } else c.appendChild(el('p', 'idea-details', it.details));
     }
     const created = shortDate(it.createdAt), updated = shortDate(it.updatedAt);
-    const meta = [created ? 'Added ' + created : '', updated && updated !== created ? 'updated ' + updated : ''].filter(Boolean).join(' Â· ');
+    const meta = [created ? 'Added ' + created : '', updated && updated !== created ? 'updated ' + updated : ''].filter(Boolean).join(' · ');
     const bar = el('div', 'idea-bar');
     bar.appendChild(el('span', 'sub idea-meta', meta));
     const ctl = el('div', 'idea-ctl');
@@ -1224,7 +1224,7 @@
   }
   function ideaValid(state) {
     const title = L.cleanIdeaTitle(state.title), details = L.cleanIdeaDetails(state.details);
-    if (!title) return { err: `Titles are 1â€“${L.IDEA_TITLE_MAX} characters` };
+    if (!title) return { err: `Titles are 1–${L.IDEA_TITLE_MAX} characters` };
     if (details === null) return { err: `Details are up to ${L.IDEA_DETAILS_MAX} characters` };
     return { title, details, priority: L.IDEA_PRIORITIES.includes(state.priority) ? state.priority : null };
   }
@@ -1235,7 +1235,7 @@
     save.type = cancel.type = 'button';
     const upd8 = () => {
       const v = ideaValid(ideaEdit);
-      f.count.textContent = `${ideaEdit.title.trim().length}/${L.IDEA_TITLE_MAX} Â· ${ideaEdit.details.length}/${L.IDEA_DETAILS_MAX}`;
+      f.count.textContent = `${ideaEdit.title.trim().length}/${L.IDEA_TITLE_MAX} · ${ideaEdit.details.length}/${L.IDEA_DETAILS_MAX}`;
       save.disabled = !!v.err || (v.title === it.title && v.details === it.details && v.priority === (it.priority || null));
     };
     for (const x of [f.t, f.d]) x.addEventListener('input', upd8);
@@ -1265,7 +1265,7 @@
     if (cur && cur.op === 'add' && !sync.sent[key]) await setLocal(key, Object.assign(bareTap(cur), v));
     else await setLocal(key, Object.assign({ op: 'edit' }, v));
     focusIdea(id);
-    toast('Idea updated Â· syncing to your other devices');
+    toast('Idea updated · syncing to your other devices');
   }
   async function setIdeaStatus(it, status) {
     if (!L.IDEA_STATUSES.includes(status) || status === it.status) return;
@@ -1273,7 +1273,7 @@
     if (cur && cur.op === 'add' && !sync.sent[key]) await setLocal(key, Object.assign(bareTap(cur), { status }));
     else await setLocal('ideast:' + it.id, { status });
     focusIdea(it.id);
-    toast(`${L.IDEA_STATUS_LABEL[status]} Â· syncing to your other devices`);
+    toast(`${L.IDEA_STATUS_LABEL[status]} · syncing to your other devices`);
   }
   function bareTap(v) { const o = Object.assign({}, v); delete o.at; delete o.keep; return o; }
   function newIdeaId() {
@@ -1287,7 +1287,7 @@
     ideaDraft.title = ideaDraft.details = ideaDraft.priority = '';
     $('ideaTitle').value = ''; $('ideaDetails').value = ''; $('ideaPriority').value = '';
     updateIdeaForm();
-    toast('Idea added Â· syncing to your other devices');
+    toast('Idea added · syncing to your other devices');
   }
   function updateIdeaForm() {
     const t = $('ideaTitle').value, d = $('ideaDetails').value;
@@ -1322,7 +1322,7 @@
     if (!open.length) out.push(el('p', 'empty', items.length ? 'No open ideas.' : 'No ideas yet. Add the first one above.'));
     if (closed.length) {
       const det = el('details', 'more-rows idea-closed-group');
-      const sum = el('summary'); sum.append(el('span', 'muted', `Done & dropped (${closed.length})`), el('span', 'chev', 'â€º'));
+      const sum = el('summary'); sum.append(el('span', 'muted', `Done & dropped (${closed.length})`), el('span', 'chev', '›'));
       det.appendChild(sum);
       const box = el('div', 'list'); closed.forEach(i => box.appendChild(ideaCard(i))); det.appendChild(box);
       remember(det, 'ideas-closed', false);
@@ -1396,8 +1396,8 @@
       const scroll = el('div', 'wiki-fig-scroll'); scroll.tabIndex = 0; scroll.setAttribute('role', 'region'); scroll.setAttribute('aria-label', b.alt);
       const img = el('img'); img.src = f.src; img.alt = b.alt; img.width = f.w; img.height = f.h; img.loading = 'lazy'; img.decoding = 'async';
       scroll.appendChild(img); fig.appendChild(scroll);
-      const zoom = el('button', 'btn small ghost wiki-zoom', 'â¤¢ Full size'); zoom.type = 'button';
-      zoom.addEventListener('click', () => { const z = fig.classList.toggle('zoom'); zoom.textContent = z ? 'â¤¡ Fit width' : 'â¤¢ Full size'; zoom.setAttribute('aria-pressed', String(z)); });
+      const zoom = el('button', 'btn small ghost wiki-zoom', '⤢ Full size'); zoom.type = 'button';
+      zoom.addEventListener('click', () => { const z = fig.classList.toggle('zoom'); zoom.textContent = z ? '⤡ Fit width' : '⤢ Full size'; zoom.setAttribute('aria-pressed', String(z)); });
       zoom.setAttribute('aria-pressed', 'false');
       const cap = el('figcaption', 'muted small'); cap.append(el('span', '', b.alt), zoom);
       fig.appendChild(cap);
@@ -1426,7 +1426,7 @@
       const out = [];
       doc.intro.forEach(b => { const n = wikiBlock(b, doc.figs); if (n) out.push(n); });
       const toc = el('details', 'card-lite wiki-toc');
-      const ts = el('summary'); ts.append(el('span', 'title', `Contents (${doc.sections.length})`), el('span', 'chev', 'â€º')); toc.appendChild(ts);
+      const ts = el('summary'); ts.append(el('span', 'title', `Contents (${doc.sections.length})`), el('span', 'chev', '›')); toc.appendChild(ts);
       const ol = el('ol', 'wiki-toc-list');
       for (const s of doc.sections) {
         const a = el('a', 'link', s.title); a.href = '#' + s.id;
@@ -1436,7 +1436,7 @@
       toc.appendChild(ol); remember(toc, 'wiki-toc', true, true); out.push(toc);
       for (const s of doc.sections) {
         const det = el('details', 'wiki-sec'); det.id = 'w-' + s.id;
-        const sum = el('summary'); sum.append(el('h3', 'wiki-title', s.title), el('span', 'chev', 'â€º')); det.appendChild(sum);
+        const sum = el('summary'); sum.append(el('h3', 'wiki-title', s.title), el('span', 'chev', '›')); det.appendChild(sum);
         const body = el('div', 'wiki-body'); det.appendChild(body);
         let built = false;
         const build = () => { if (built) return; built = true; s.blocks.forEach(b => { const n = wikiBlock(b, doc.figs); if (n) body.appendChild(n); }); };
@@ -1449,7 +1449,7 @@
       wiki.hash = packed.hash;
     } catch (e) {
       console.error('wiki', e);
-      box.replaceChildren(el('p', 'empty', 'âš ï¸ The wiki could not be shown: ' + e.message));
+      box.replaceChildren(el('p', 'empty', '⚠️ The wiki could not be shown: ' + e.message));
     } finally { wiki.busy = false; }
   }
 
@@ -1458,9 +1458,9 @@
     const out = rows.map(m => {
       const paid = m.status === 'paid';
       const when = m.daysLeft == null ? 'no due date' : (m.overdue ? `overdue by ${-m.daysLeft} day${m.daysLeft === -1 ? '' : 's'}` : 'due ' + L.relDays(m.daysLeft));
-      const title = (m.urgent && !paid ? 'ðŸš¨ ' : '') + m.label + (m.last4 ? ' â€¢â€¢' + m.last4 : '');
+      const title = (m.urgent && !paid ? '🚨 ' : '') + m.label + (m.last4 ? ' ••' + m.last4 : '');
       const amount = typeof m.amount === 'number' ? inr.format(m.amount) : (m.amount || '');
-      const c = row(paid ? 'past' : (m.urgent ? 'urgent' : ''), title, [`${amount} Â· ${L.fmtDate(m.dueDate)} (${when})`],
+      const c = row(paid ? 'past' : (m.urgent ? 'urgent' : ''), title, [`${amount} · ${L.fmtDate(m.dueDate)} (${when})`],
         [pill(paid ? 'paid' : 'unpaid', paid ? 'green' : (m.urgent ? 'red' : '')),
          m.paidLocally ? btn('Undo', 'ghost', () => delLocal(m.kind + ':' + m.id))
            : (!paid ? btn('Mark paid', 'done', () => setLocal(m.kind + ':' + m.id, { status: 'paid', date: today })) : null)]);
@@ -1472,16 +1472,16 @@
     renderNotices(today);
   }
 
-  // From email: payment links, toll tag, returns, refunds â€¦ (open first; done ones folded away).
+  // From email: payment links, toll tag, returns, refunds … (open first; done ones folded away).
   const noticeWhen = n => n.daysLeft == null ? null : n.overdue ? `overdue by ${-n.daysLeft} day${n.daysLeft === -1 ? '' : 's'}` : n.daysLeft === 0 ? 'today' : L.relDays(n.daysLeft);
   function noticeRow(n, today) {
     const open = n.status === 'open';
     const sub = [n.summary || null, n.dueDate ? `${n.dueLabel || 'Due'} ${L.fmtDate(n.dueDate)}${open ? ' (' + noticeWhen(n) + ')' : ''}` : null];
-    const c = row(!open ? 'past' : n.overdue || n.sev === 'urgent' ? 'urgent' : n.sev === 'warn' ? 'warn' : '', `${n.icon || 'ðŸ“¬'} ${n.title}`, sub,
+    const c = row(!open ? 'past' : n.overdue || n.sev === 'urgent' ? 'urgent' : n.sev === 'warn' ? 'warn' : '', `${n.icon || '📬'} ${n.title}`, sub,
       [pill(!open ? 'done' : n.overdue ? 'overdue' : n.pill || (n.sev === 'info' ? 'info' : 'to do'), !open ? 'green' : n.overdue || n.sev === 'urgent' ? 'red' : n.sev === 'warn' ? 'amber' : 'blue'),
        n.dismissed ? btn('Restore', 'ghost', () => setDismiss('noticedis', n.id, noticeBaseDismissed(n.id), false, n.title))
          : n.doneLocally ? btn('Undo', 'ghost', () => delLocal('notice:' + n.id))
-         : open ? btn('Done âœ“', 'done', () => setLocal('notice:' + n.id, { status: 'done', date: today })) : null,
+         : open ? btn('Done ✓', 'done', () => setLocal('notice:' + n.id, { status: 'done', date: today })) : null,
        open ? btn('Dismiss', 'ghost', () => setDismiss('noticedis', n.id, noticeBaseDismissed(n.id), true, n.title)) : null,
        n.dismissedLocally ? pill(sync.sent['noticedis:' + n.id] ? 'sent' : 'queued', sync.sent['noticedis:' + n.id] ? 'blue' : 'amber') : null]);
     const more = moreDetails(n.details, 'notice:' + n.id); if (more) c.appendChild(more);
@@ -1496,7 +1496,7 @@
     for (const [list, label, key] of [[done, 'Done', 'notices-done'], [dis, 'Dismissed', 'notices-dismissed']]) {
       if (!list.length) continue;
       const det = remember(el('details', 'old-group'), key);
-      const s = el('summary'); s.append(el('span', 'muted small', `${label} (${list.length})`), el('span', 'chev', 'â€º'));
+      const s = el('summary'); s.append(el('span', 'muted small', `${label} (${list.length})`), el('span', 'chev', '›'));
       const l = el('div', 'list'); list.forEach(n => l.appendChild(noticeRow(n, today)));
       det.append(s, l); out.push(det);
     }
@@ -1513,11 +1513,11 @@
     if (!isDay) {
       // Holiday / weekend: no drop-off / pick-up cards, just when school is next.
       const why = L.noSchoolReason(st.data, today);
-      const out = [el('p', 'muted small', `ðŸ¥³ No school today: ${why ? why.name : 'Holiday'}`)];
+      const out = [el('p', 'muted small', `🥳 No school today: ${why ? why.name : 'Holiday'}`)];
       const next = L.nextSchoolDay(st.data, today);
       const runs = sc.runs || [];
       if (next && runs.length) {
-        const c = row('next-school', `ðŸ“… Next school day: ${L.fmtDate(next)} (${L.relDays(L.daysBetween(today, next))})`,
+        const c = row('next-school', `📅 Next school day: ${L.fmtDate(next)} (${L.relDays(L.daysBetween(today, next))})`,
           runs.map(r => `${r.label}: leave at ${L.fmtTime(r.leaveAt)}` + (r.eventAt ? ` (${L.fmtTime(r.eventAt)})` : '')));
         out.push(c);
       }
@@ -1525,13 +1525,13 @@
       $('familyList').replaceChildren(...out);
       return;
     }
-    const out = [el('p', 'muted small', 'âœ… School day today Â· ' + daysTxt)];
+    const out = [el('p', 'muted small', '✅ School day today · ' + daysTxt)];
     for (const r of (sc.runs || [])) {
       const delta = L.hhmmToMin(r.leaveAt) - nowMin;
       const urgent = isDay && Math.abs(delta) <= win;
       const done = isDay && delta < -win;
-      const sub = `Leave at ${L.fmtTime(r.leaveAt)}` + (r.eventAt ? ` Â· ${r.label.toLowerCase().includes('pick') ? 'pick-up' : 'event'} at ${L.fmtTime(r.eventAt)}` : '');
-      out.push(row(urgent ? 'urgent' : (done ? 'past' : (isDay && delta > 0 && delta <= 60 ? 'warn' : '')), (urgent ? 'ðŸš¨ Leave now: ' : '') + r.label, sub,
+      const sub = `Leave at ${L.fmtTime(r.leaveAt)}` + (r.eventAt ? ` · ${r.label.toLowerCase().includes('pick') ? 'pick-up' : 'event'} at ${L.fmtTime(r.eventAt)}` : '');
+      out.push(row(urgent ? 'urgent' : (done ? 'past' : (isDay && delta > 0 && delta <= 60 ? 'warn' : '')), (urgent ? '🚨 Leave now: ' : '') + r.label, sub,
         isDay ? pill(done ? 'done' : (delta > 0 ? 'in ' + (delta >= 60 ? Math.floor(delta / 60) + 'h ' : '') + (delta % 60) + 'm' : 'now'), urgent ? 'red' : '') : null));
     }
     appendHolidays(out, sc, today);
@@ -1542,16 +1542,16 @@
     const parts = [];
     if (daysTxt) parts.push('School days: ' + daysTxt);
     if (upcoming.length) parts.push('Holidays: ' + upcoming.map(L.fmtDate).join(', '));
-    if (parts.length) out.push(el('p', 'muted small', parts.join(' Â· ')));
+    if (parts.length) out.push(el('p', 'muted small', parts.join(' · ')));
   }
 
   function renderCharging(now, today) {
     const nowMin = L.istMinutes(now);
     const out = L.chargingDevices(st.data, st.overrides, today).map(d => {
       const due = !d.chargedToday && nowMin >= L.hhmmToMin(d.reminderTime);
-      return row(d.chargedToday ? 'past' : (due ? 'urgent' : ''), `${d.icon || 'ðŸ”‹'} ${d.name}`, `Reminder ${L.fmtTime(d.reminderTime)} daily`,
-        d.chargedToday ? [pill('âœ“ charged', 'green'), d.chargedLocally ? btn('Undo', 'ghost', () => delLocal('charge:' + d.id)) : null]
-          : btn('Charged âœ“', 'done', () => setLocal('charge:' + d.id, { date: today })));
+      return row(d.chargedToday ? 'past' : (due ? 'urgent' : ''), `${d.icon || '🔋'} ${d.name}`, `Reminder ${L.fmtTime(d.reminderTime)} daily`,
+        d.chargedToday ? [pill('✓ charged', 'green'), d.chargedLocally ? btn('Undo', 'ghost', () => delLocal('charge:' + d.id)) : null]
+          : btn('Charged ✓', 'done', () => setLocal('charge:' + d.id, { date: today })));
     });
     $('chargingList').replaceChildren(...out);
   }
@@ -1563,13 +1563,13 @@
     const ov = L.maintenanceOverview(st.data, st.overrides, today);
     const box = el('div', 'card weekend' + (ov.isToday && ov.dueCount ? ' urgent' : ''));
     const c = ov.counts;
-    box.appendChild(el('h3', null, `${ov.isToday && ov.dueCount ? 'ðŸš¨ ' : 'ðŸ—“ï¸ '}Maintenance weekend ${L.fmtDate(ov.date)} (${L.relDays(ov.daysUntil)})`));
-    box.appendChild(el('p', 'weekend-line', `${ov.dueCount} due Â· ${c.done} done Â· ${c.upcoming} upcoming`));
+    box.appendChild(el('h3', null, `${ov.isToday && ov.dueCount ? '🚨 ' : '🗓️ '}Maintenance weekend ${L.fmtDate(ov.date)} (${L.relDays(ov.daysUntil)})`));
+    box.appendChild(el('p', 'weekend-line', `${ov.dueCount} due · ${c.done} done · ${c.upcoming} upcoming`));
     // Breakdown of the "due" number only (done / upcoming are already in the line above).
     const chips = el('div', 'chip-row');
     for (const [s, label] of [['overdue'], ['due', 'due by Sat'], ['never']]) if (c[s]) chips.appendChild(maintPill(s, c[s], label));
     if (chips.childNodes.length) box.appendChild(chips);
-    box.appendChild(el('p', 'muted small', `Every other Saturday Â· ${ov.total} tasks on ${ov.appliances.length} appliances`));
+    box.appendChild(el('p', 'muted small', `Every other Saturday · ${ov.total} tasks on ${ov.appliances.length} appliances`));
     $('weekendBox').replaceChildren(box);
 
     const out = ov.appliances.map(ap => {
@@ -1580,12 +1580,12 @@
       s.appendChild(name);
       const worst = ap.counts[ap.status];
       s.appendChild(maintPill(ap.status, ap.tasks.length ? worst : null));
-      s.appendChild(el('span', 'chev', 'â€º'));
+      s.appendChild(el('span', 'chev', '›'));
       det.appendChild(s);
       const list = el('div', 'list appl-tasks');
       ap.tasks.forEach(t => {
         const when = t.unknown ? 'next maintenance weekend' : t.overdue ? `overdue ${-t.daysLeft}d` : L.relDays(t.daysLeft);
-        const sub = [`Every ${t.everyDays} days Â· ${t.lastDone ? 'last done ' + L.fmtDate(t.lastDone) : 'not logged yet'}`, `Next: ${L.fmtDate(t.nextDue)} (${when})`];
+        const sub = [`Every ${t.everyDays} days · ${t.lastDone ? 'last done ' + L.fmtDate(t.lastDone) : 'not logged yet'}`, `Next: ${L.fmtDate(t.nextDue)} (${when})`];
         list.appendChild(row('task ' + (t.status === 'done' ? 'past' : t.status === 'overdue' ? 'urgent' : ''), t.name, sub,
           [maintPill(t.status), t.doneLocally ? btn('Undo', 'ghost', () => delLocal('maint:' + t.id))
             : btn('Done today', 'done', () => setLocal('maint:' + t.id, { lastDone: today }))]));
@@ -1603,11 +1603,11 @@
     for (const info of active) {
       const f = info.fest;
       const card = el('div', 'item fest-card active');
-      card.appendChild(el('p', 'fest-title', `${f.emoji || 'ðŸŽ‰'} ${f.name}`));
+      card.appendChild(el('p', 'fest-title', `${f.emoji || '🎉'} ${f.name}`));
       const dayLine = info.totalDays > 1
-        ? `${info.label} Â· Day ${info.dayNum} of ${info.totalDays}`
+        ? `${info.label} · Day ${info.dayNum} of ${info.totalDays}`
         : info.label;
-      const note = info.note ? ` Â· ${info.note}` : '';
+      const note = info.note ? ` · ${info.note}` : '';
       card.appendChild(el('p', 'fest-meta', dayLine + note));
       const bar = el('div', 'fest-progress');
       const fill = el('span');
@@ -1634,9 +1634,9 @@
     for (const u of upcoming) {
       const f = u.fest;
       const card = el('div', 'item fest-card compact');
-      card.appendChild(el('p', 'fest-title', `${f.emoji || 'ðŸŽ‰'} ${f.name}`));
+      card.appendChild(el('p', 'fest-title', `${f.emoji || '🎉'} ${f.name}`));
       card.appendChild(el('p', 'fest-meta',
-        `Starts ${L.fmtDate(f.start)} (${L.relDays(u.daysUntil)}) Â· ${u.totalDays} day${u.totalDays === 1 ? '' : 's'} through ${L.fmtDate(f.end)}`));
+        `Starts ${L.fmtDate(f.start)} (${L.relDays(u.daysUntil)}) · ${u.totalDays} day${u.totalDays === 1 ? '' : 's'} through ${L.fmtDate(f.end)}`));
       out.push(card);
     }
     if (!out.length) out.push(el('p', 'empty', 'No active or upcoming festivals in the next 3 weeks.'));
@@ -1646,17 +1646,17 @@
   function renderSupplies(today) {
     const items = L.supplyItems(st.data, st.overrides, today);
     const out = items.map(it => {
-      const sub = [`${it.quantity || ''}${it.quantity ? ' Â· ' : ''}${it.store || ''} Â· every ~${it.intervalDays} days${it.intervalEstimated ? ' (est.)' : ''}`,
-        `Last bought ${it.lastBought ? L.fmtDate(it.lastBought) : 'unknown'}` + (it.lowSoonOn ? ` Â· low around ${L.fmtDate(it.lowSoonOn)}` : '')];
-      const c = row(it.status === 'out' ? 'urgent' : (it.flagged ? 'warn' : ''), (it.status === 'out' ? 'ðŸš¨ ' : '') + it.name, sub,
+      const sub = [`${it.quantity || ''}${it.quantity ? ' · ' : ''}${it.store || ''} · every ~${it.intervalDays} days${it.intervalEstimated ? ' (est.)' : ''}`,
+        `Last bought ${it.lastBought ? L.fmtDate(it.lastBought) : 'unknown'}` + (it.lowSoonOn ? ` · low around ${L.fmtDate(it.lowSoonOn)}` : '')];
+      const c = row(it.status === 'out' ? 'urgent' : (it.flagged ? 'warn' : ''), (it.status === 'out' ? '🚨 ' : '') + it.name, sub,
         pill(it.status === 'ok' ? (it.runningLowSoon ? 'running low soon' : 'ok') : it.status, it.status === 'out' ? 'red' : (it.flagged ? 'amber' : 'green')));
       const actions = el('div', 'row-btns');
       if (it.status !== 'low') actions.appendChild(btn('Low', '', () => setLocal('supply:' + it.id, { status: 'low' })));
       if (it.status !== 'out') actions.appendChild(btn('Out', '', () => setLocal('supply:' + it.id, { status: 'out' })));
-      actions.appendChild(btn('Bought âœ“', 'done', () => setLocal('supply:' + it.id, { status: 'ok', lastBought: today })));
+      actions.appendChild(btn('Bought ✓', 'done', () => setLocal('supply:' + it.id, { status: 'ok', lastBought: today })));
       if (st.overrides['supply:' + it.id]) actions.appendChild(btn('Undo', 'ghost', () => delLocal('supply:' + it.id)));
       const href = it.link && safeLink(it.link);
-      if (href) { const a = el('a', 'link', 'Open in ' + (it.store || 'store') + ' â†—'); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; actions.appendChild(a); }
+      if (href) { const a = el('a', 'link', 'Open in ' + (it.store || 'store') + ' ↗'); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; actions.appendChild(a); }
       c.appendChild(actions);
       return c;
     });
@@ -1671,11 +1671,11 @@
     if (c.type === 'todo.dismiss' || c.type === 'todo.restore') return `${c.type === 'todo.dismiss' ? 'Dismiss' : 'Restore'}: ${find((d.todos || {}).items).title || c.id}`;
     if (c.type === 'notice.dismiss' || c.type === 'notice.restore') return `${c.type === 'notice.dismiss' ? 'Dismiss' : 'Restore'}: ${find((d.notices || {}).items).title || c.id}`;
     if (c.type === 'todo.done' || c.type === 'todo.undone') return `${c.type === 'todo.done' ? 'Done' : 'Reopened'}: ${find((d.todos || {}).items).title || c.id}`;
-    if (c.type === 'note.add') return 'Note: ' + (String(c.text || '').length > 40 ? String(c.text).slice(0, 40) + 'â€¦' : c.text);
-    if (c.type === 'note.edit') return 'Edit note: ' + (String(c.text || '').length > 40 ? String(c.text).slice(0, 40) + 'â€¦' : c.text);
+    if (c.type === 'note.add') return 'Note: ' + (String(c.text || '').length > 40 ? String(c.text).slice(0, 40) + '…' : c.text);
+    if (c.type === 'note.edit') return 'Edit note: ' + (String(c.text || '').length > 40 ? String(c.text).slice(0, 40) + '…' : c.text);
     if (c.type === 'note.delete') return 'Delete note: ' + ((find((d.notes || {}).items).text || c.id).slice(0, 40));
     if (/^idea\./.test(c.type)) {
-      const t = c.title || find((d.ideas || {}).items).title || c.id, short = String(t).length > 40 ? String(t).slice(0, 40) + 'â€¦' : t;
+      const t = c.title || find((d.ideas || {}).items).title || c.id, short = String(t).length > 40 ? String(t).slice(0, 40) + '…' : t;
       return c.type === 'idea.add' ? 'Idea: ' + short : c.type === 'idea.edit' ? 'Edit idea: ' + short
         : c.type === 'idea.delete' ? 'Delete idea: ' + short : `Idea ${L.IDEA_STATUS_LABEL[c.status] || c.status}: ${short}`;
     }
@@ -1693,14 +1693,14 @@
     }));
     const ap = sync.applied;
     $('syncApplied').classList.toggle('hidden', !(ap.n && Date.now() - ap.at < 15 * 60000));
-    $('syncApplied').textContent = ap.n ? `âœ“ ${ap.n} change${ap.n === 1 ? '' : 's'} applied ${hm(ap.at)} IST` : '';
+    $('syncApplied').textContent = ap.n ? `✓ ${ap.n} change${ap.n === 1 ? '' : 's'} applied ${hm(ap.at)} IST` : '';
     renderSyncState();
     $('syncCount').textContent = String(changes.length);
     $('syncJson').value = changes.length
       ? JSON.stringify({ lifeHqChanges: 1, exportedAt: new Date().toISOString(), baseUpdatedAt: st.data.updatedAt || null, changes })
       : '';
     $('syncJson').placeholder = 'No local changes yet.';
-    $('dataInfo').textContent = `Data version ${st.data.schemaVersion || '?'} Â· updated ${st.data.updatedAt ? fmtIST(Date.parse(st.data.updatedAt)) : 'unknown'}`;
+    $('dataInfo').textContent = `Data version ${st.data.schemaVersion || '?'} · updated ${st.data.updatedAt ? fmtIST(Date.parse(st.data.updatedAt)) : 'unknown'}`;
   }
 
   async function renderAll() {
@@ -1710,7 +1710,7 @@
       const now = nowMs(), today = L.istDate(now);
       const parts = [() => renderToday(now, today), () => renderTodoSection(today), renderNotes, renderIdeas, () => renderMoney(today), () => renderFamily(now, today), () => renderFestivals(today),
         () => renderCharging(now, today), () => renderHome(today), () => renderSupplies(today), renderSync, () => { renderWiki(); }, renderHealthView];
-      for (const p of parts) { try { p(); } catch (e) { console.error(e); banner('âš ï¸ Some data could not be shown: ' + e.message); } }
+      for (const p of parts) { try { p(); } catch (e) { console.error(e); banner('⚠️ Some data could not be shown: ' + e.message); } }
     }
     $('s-today').classList.toggle('hidden', !st.data);
     for (const id of ['s-todos', 's-notes', 's-ideas', 's-wiki', 's-money', 's-family', 's-festivals', 's-charging', 's-home', 's-supplies', 's-sync', 's-health']) $(id).classList.toggle('hidden', !st.data);
@@ -1725,7 +1725,7 @@
     const left = el('div', 'meta-left');
     left.appendChild(el('span', 'ts', fmtIST(a.ts || a.receivedAt)));
     const href = a.url && safeLink(a.url);
-    if (href) { left.appendChild(document.createTextNode(' Â· ')); const l = el('a', 'link', 'Open link'); l.href = href; l.target = '_blank'; l.rel = 'noopener noreferrer'; left.appendChild(l); }
+    if (href) { left.appendChild(document.createTextNode(' · ')); const l = el('a', 'link', 'Open link'); l.href = href; l.target = '_blank'; l.rel = 'noopener noreferrer'; left.appendChild(l); }
     m.appendChild(left);
     const list = (Array.isArray(b) ? b : [b]).filter(Boolean);
     if (list.length) { const r = el('div', 'meta-btns'); list.forEach(x => r.appendChild(x)); m.appendChild(r); }
@@ -1733,18 +1733,18 @@
   }
   function urgentCard(a, old) {
     const c = el('div', 'item urgent' + (old ? ' old' : '')); c.id = 'a-' + a.id;
-    c.appendChild(el('p', 'title', a.title.includes('ðŸš¨') ? a.title : 'ðŸš¨ ' + a.title));
+    c.appendChild(el('p', 'title', a.title.includes('🚨') ? a.title : '🚨 ' + a.title));
     if (a.body) c.appendChild(el('p', 'body', a.body));
     if (a.items && a.items.length) { const ul = el('ul'); a.items.forEach(i => ul.appendChild(el('li', null, i))); c.appendChild(ul); }
-    c.appendChild(metaRow(a, [actionBtn('âœ“ Mark done', 'done', a.id, 'done'), actionBtn('Dismiss', '', a.id, 'dismissed')]));
+    c.appendChild(metaRow(a, [actionBtn('✓ Mark done', 'done', a.id, 'done'), actionBtn('Dismiss', '', a.id, 'dismissed')]));
     return c;
   }
   function summaryCard(a, openFirst, old) {
     const c = el('div', 'item' + (old ? ' old' : '')); c.id = 'a-' + a.id;
     const d = el('details'); if (openFirst) d.open = true;
     const s = el('summary');
-    s.appendChild(el('span', 'chev', 'â€º'));
-    s.appendChild(el('p', 'title', (a.type === 'summary' && !a.title.includes('ðŸ“‹') ? 'ðŸ“‹ ' : '') + a.title));
+    s.appendChild(el('span', 'chev', '›'));
+    s.appendChild(el('p', 'title', (a.type === 'summary' && !a.title.includes('📋') ? '📋 ' : '') + a.title));
     if (a.body) s.appendChild(el('p', 'body', a.body));
     d.appendChild(s);
     if (a.items && a.items.length) { const ul = el('ul'); a.items.forEach(i => ul.appendChild(el('li', null, i))); d.appendChild(ul); }
@@ -1832,7 +1832,7 @@
   async function currentSub() { if (!reg || !('pushManager' in reg)) return null; return reg.pushManager.getSubscription(); }
   async function showSub() {
     $('subJson').value = st.device ? await enrollCode() : '';
-    if (!st.device) { banner('This device has no key. Tap â€œCreate this deviceâ€™s keyâ€ first.'); return; }
+    if (!st.device) { banner('This device has no key. Tap “Create this device’s key” first.'); return; }
     $('subBox').classList.remove('hidden');
     $('subBox').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -1851,19 +1851,19 @@
       await refreshSetup();
       await refreshEnroll();
       await showSub();
-    } catch (e) { banner('âš ï¸ ' + e.message); }
+    } catch (e) { banner('⚠️ ' + e.message); }
   }
   async function refreshSetup() {
     const sub = await currentSub().catch(() => null);
     const granted = 'Notification' in window && Notification.permission === 'granted';
     const keyOk = !sub || sameKey(sub, cfg.vapidPublicKey || '');
     $('setup').classList.toggle('hidden', !!(sub && granted && keyOk));
-    if (sub && !keyOk) banner('ðŸ”‘ The app key changed. Tap "Enable notifications" and paste the new enrollment code to your assistant.');
-    if (!supported) banner('âš ï¸ This browser does not support push notifications. Open in Chrome on Android.');
-    else if (Notification.permission === 'denied') banner('âš ï¸ Notifications are blocked. Allow them in Chrome site settings, then tap Enable.');
+    if (sub && !keyOk) banner('🔑 The app key changed. Tap "Enable notifications" and paste the new enrollment code to your assistant.');
+    if (!supported) banner('⚠️ This browser does not support push notifications. Open in Chrome on Android.');
+    else if (Notification.permission === 'denied') banner('⚠️ Notifications are blocked. Allow them in Chrome site settings, then tap Enable.');
     const changed = await HQDB.getMeta('subChanged').catch(() => null);
-    if (changed && sub) banner('ðŸ”„ Your push subscription changed. Open âš™ï¸ â†’ "Show my enrollment code again" and paste it to your assistant.');
-    status(sub ? 'Subscribed âœ“  Permission: ' + Notification.permission : 'Not subscribed yet.');
+    if (changed && sub) banner('🔄 Your push subscription changed. Open ⚙️ → "Show my enrollment code again" and paste it to your assistant.');
+    status(sub ? 'Subscribed ✓  Permission: ' + Notification.permission : 'Not subscribed yet.');
   }
   async function copyText(ta, button, idle, okText) {
     let ok = false;
@@ -1873,11 +1873,11 @@
     return ok;
   }
   async function copySub() {
-    const ok = await copyText($('subJson'), $('copyBtn'), 'ðŸ“‹ Copy', 'âœ… Copied! Paste it to your assistant');
+    const ok = await copyText($('subJson'), $('copyBtn'), '📋 Copy', '✅ Copied! Paste it to your assistant');
     if (ok) HQDB.setMeta('subChanged', null).then(refreshSetup);
   }
   async function testPush() {
-    if (Notification.permission !== 'granted') { banner('âš ï¸ Enable notifications first.'); return; }
+    if (Notification.permission !== 'granted') { banner('⚠️ Enable notifications first.'); return; }
     const sw = (reg && reg.active) || navigator.serviceWorker.controller;
     if (!sw) { banner('Service worker not active yet, try again in a moment.'); return; }
     sw.postMessage({ kind: 'test-push', payload: { id: 'test-' + Date.now(), type: 'urgent', title: 'Test alert', body: 'This is how an urgent alert looks. Tap "Mark done" to clear it.', ts: Date.now() } });
@@ -1974,13 +1974,13 @@
     $('forgetBtn').addEventListener('click', forgetDevice);
     $('newKeyBtn').addEventListener('click', newKey);
     $('retryBtn').addEventListener('click', () => unlockFlow());
-    $('copyEnrollBtn').addEventListener('click', () => copyText($('enrollJson'), $('copyEnrollBtn'), 'ðŸ“‹ Copy', 'âœ… Copied! Paste it to your assistant'));
+    $('copyEnrollBtn').addEventListener('click', () => copyText($('enrollJson'), $('copyEnrollBtn'), '📋 Copy', '✅ Copied! Paste it to your assistant'));
     $('deviceName').addEventListener('input', async () => { await HQDB.setMeta('deviceName', $('deviceName').value.slice(0, 40)).catch(() => {}); refreshEnroll(); });
     $('noDataBtn').addEventListener('click', () => { st.noData = true; openDashboard(); });
     $('enableBtn').addEventListener('click', enable);
     $('enableBtn2').addEventListener('click', enable);
     $('copyBtn').addEventListener('click', copySub);
-    $('copySyncBtn').addEventListener('click', () => copyText($('syncJson'), $('copySyncBtn'), 'ðŸ“‹ Copy changes', 'âœ… Copied! Paste it to your assistant'));
+    $('copySyncBtn').addEventListener('click', () => copyText($('syncJson'), $('copySyncBtn'), '📋 Copy changes', '✅ Copied! Paste it to your assistant'));
     $('hideSubBtn').addEventListener('click', () => $('subBox').classList.add('hidden'));
     $('menuBtn').addEventListener('click', () => { const open = $('settings').classList.toggle('hidden') === false; $('menuBtn').setAttribute('aria-expanded', String(open)); });
     $('showSubBtn').addEventListener('click', async () => {
@@ -2017,7 +2017,7 @@
         } else if (d.kind === 'sub-changed') { refreshSetup(); refreshEnroll(); }
       });
     }
-    // No auto-lock and no prompt: an enrolled device opens the data directly until ðŸ”’ Lock / Forget this device.
+    // No auto-lock and no prompt: an enrolled device opens the data directly until 🔒 Lock / Forget this device.
     // Update checks (data + code) and the idle gate: see wireUpdates().
     // (Also picks up "maybe the assistant has published for this device meanwhile" on the enroll screen.)
     wireUpdates();
@@ -2026,7 +2026,7 @@
 
   async function init() {
     wire();
-    try { await registerSW(); } catch (e) { banner('âš ï¸ Could not start service worker: ' + e.message); }
+    try { await registerSW(); } catch (e) { banner('⚠️ Could not start service worker: ' + e.message); }
     await refreshSetup().catch(() => {});
     st.flashId = location.hash && !location.hash.startsWith('#s-') ? decodeURIComponent(location.hash.slice(1)) : null;
     if (st.flashId) history.replaceState(null, '', location.pathname + location.search);
@@ -2038,7 +2038,7 @@
     st.device = await loadDevice();
     if (!st.device) {
       // First run: create this device's key pair automatically.
-      try { st.device = await createDevice(); } catch (e) { banner('âš ï¸ Could not create a device key: ' + e.message); }
+      try { st.device = await createDevice(); } catch (e) { banner('⚠️ Could not create a device key: ' + e.message); }
     }
     await unlockFlow();
     st.lastCheck = Date.now();

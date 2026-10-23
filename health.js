@@ -190,6 +190,32 @@
     tiles.appendChild(tile('Neck pain', log.pain != null ? `${log.pain}` : '—', log.pain != null ? 'out of 10' : 'not logged'));
     root.appendChild(tiles);
 
+    // last 7 days: makes a missed day visible instead of letting it disappear
+    if (ctx.strip && ctx.strip.length) {
+      const c = card('Last 7 days', { tag: 'missed days show here' });
+      const row = el('div', 'hstrip');
+      for (const s of ctx.strip) {
+        const canOpen = ctx.isEditable ? ctx.isEditable(s.date) : false;
+        const cell = el('button', 'hcell ' + s.state + (s.date === ctx.today ? ' today' : '') + (canOpen ? '' : ' ro'));
+        cell.type = 'button';
+        cell.setAttribute('aria-label', `${s.date}: ${s.state}${s.total ? `, ${s.done} of ${s.total} done` : ''}`);
+        cell.title = s.total ? `${s.done} of ${s.total} done` : s.state;
+        cell.appendChild(el('span', 'hcell-dow', s.label));
+        cell.appendChild(el('span', 'hcell-num', String(Number(s.date.slice(8)))));
+        cell.appendChild(el('span', 'hcell-frac', s.total ? `${s.done}/${s.total}` : '·'));
+        if (canOpen) cell.addEventListener('click', () => ctx.setDate(s.date));
+        row.appendChild(cell);
+      }
+      c.appendChild(row);
+      const logged = ctx.strip.filter(s => s.state !== 'future' && s.state !== 'empty');
+      const floorDays = logged.filter(s => s.floor).length;
+      const missed = logged.filter(s => s.state === 'missed').length;
+      c.appendChild(el('p', 'hfoot', logged.length
+        ? `Floor done on ${floorDays} of the last ${logged.length} days${missed ? ` · ${missed} missed` : ''}.`
+        : 'No actions logged yet.'));
+      root.appendChild(c);
+    }
+
     // today's action
     const act = card('Today', { tag: ctx.date === ctx.today ? 'live' : 'yesterday' });
     if (items.length) {
@@ -209,6 +235,29 @@
       act.appendChild(el('p', 'empty', 'No actions dated for this day.'));
     }
     root.appendChild(act);
+
+    // anything dismissed for this day: visible and restorable here, so nothing can vanish silently
+    if (ctx.dismissed && ctx.dismissed.length) {
+      const c = card('Dismissed', { tag: `${ctx.dismissed.length}` });
+      c.appendChild(el('p', 'hlead', 'Hidden from today, but still part of the plan. Restore to bring it back.'));
+      const ul = el('ul', 'hlist-rows');
+      for (const t of ctx.dismissed) {
+        const li = el('li', 'hrow');
+        const main = el('div', 'hrow-main');
+        const line = el('span', 'hrow-title');
+        if (t.time) line.appendChild(el('span', 'htime', t.time));
+        line.appendChild(el('span', null, t.title));
+        main.appendChild(line);
+        li.appendChild(main);
+        const btn = el('button', 'btn ghost small', 'Restore');
+        btn.type = 'button';
+        btn.addEventListener('click', () => ctx.restore(t.id));
+        li.appendChild(btn);
+        ul.appendChild(li);
+      }
+      c.appendChild(ul);
+      root.appendChild(c);
+    }
 
     // quick log
     if (ctx.editable) {

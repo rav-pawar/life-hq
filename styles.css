@@ -540,3 +540,23 @@ body.view-health #s-health .section-head { display: none; }
 .htoggle input { appearance: none; -webkit-appearance: none; width: 18px; height: 18px; border: 2px solid #3a4157; border-radius: 6px; position: relative; cursor: pointer; background: transparent; }
 .htoggle input:checked { background: var(--hgreen, #2fbf71); border-color: var(--hgreen, #2fbf71); }
 .htoggle input:checked::after { content: ""; position: absolute; left: 4px; top: 1px; width: 5px; height: 9px; border: solid #06210f; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+
+/* Health: last-7-days strip */
+.hstrip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-top: 10px; }
+.hcell { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 8px 2px 7px; border-radius: 10px; border: 1px solid #262a38; background: #141822; color: var(--text); font: inherit; cursor: pointer; }
+.hcell.ro { cursor: default; }
+.hcell-dow { font-size: .6rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
+.hcell-num { font-size: .95rem; font-weight: 700; line-height: 1.1; }
+.hcell-frac { font-size: .62rem; color: var(--muted); }
+.hcell.full { border-color: rgba(47,191,113,.55); background: rgba(47,191,113,.14); }
+.hcell.full .hcell-frac { color: #7fe0a8; }
+.hcell.partial { border-color: rgba(240,180,106,.5); background: rgba(240,180,106,.10); }
+.hcell.partial .hcell-frac { color: #f0b46a; }
+.hcell.missed { border-color: rgba(239,59,59,.5); background: rgba(239,59,59,.10); }
+.hcell.missed .hcell-frac { color: #ff9b9b; }
+.hcell.empty { opacity: .45; }
+.hcell.future { opacity: .32; }
+.hcell.today { box-shadow: 0 0 0 2px rgba(76,141,255,.55); }
+.hcell:focus-visible { outline: 2px solid #8fb6ff; outline-offset: 1px; }
+@media (max-width: 420px) { .hstrip { gap: 4px; } .hcell { padding: 7px 1px 6px; } .hcell-num { font-size: .85rem; } }
+.hcell.open { border-color: rgba(76,141,255,.45); background: rgba(76,141,255,.08); } .hcell.open .hcell-frac { color: #8fb6ff; }

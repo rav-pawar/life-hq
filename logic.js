@@ -373,6 +373,40 @@
     for (const k of HEALTH_PATCH_KEYS) if (k in p) out[k] = p[k];
     return out;
   }
+  const ymdAdd = (iso, n) => istDate(Date.parse(iso + 'T00:00:00Z') + n * 86400000);
+  // One day of the scoreboard: how many actions, how many ticked, whether the floor was done, and a state.
+  // state: future | empty (no actions) | full | partial | missed
+  function healthDayStatus(data, dateISO, overrides, todayISO) {
+    if (!isYMD(dateISO)) return null;
+    const today = isYMD(todayISO) ? todayISO : istDate(Date.now());
+    const all = healthAll(data, overrides || {}, dateISO).filter(t => t.due === dateISO && !t.dismissed);
+    const done = all.filter(t => t.done).length;
+    const total = all.length;
+    const log = healthDay(data, dateISO, overrides);
+    const matched = all.filter(t => /walk|neck/i.test(t.title));
+    const floor = log.floor === true ? true
+      : log.floor === false ? false
+      : (matched.length > 0 && matched.every(t => t.done));
+    const state = dateISO > today ? 'future'
+      : total === 0 ? 'empty'
+      : done === total ? 'full'
+      : dateISO === today ? 'open'
+      : done > 0 ? 'partial'
+      : 'missed';
+    return { date: dateISO, total, done, floor: !!floor, state };
+  }
+  // The last `n` days ending today, oldest first. Anchored to today, not to the date being viewed.
+  function healthLastDays(data, todayISO, overrides, n) {
+    const today = isYMD(todayISO) ? todayISO : istDate(Date.now());
+    const count = Math.max(1, Math.min(31, n || 7));
+    const out = [];
+    for (let i = count - 1; i >= 0; i -= 1) {
+      const d = ymdAdd(today, -i);
+      const s = healthDayStatus(data, d, overrides, today);
+      if (s) { s.label = ['S', 'M', 'T', 'W', 'T', 'F', 'S'][new Date(d + 'T00:00:00Z').getUTCDay()]; out.push(s); }
+    }
+    return out;
+  }
 
   // ---- Notes to self (synced through the inbox as note.add / note.delete) ----
   const NOTE_MAX = 500;
@@ -762,7 +796,7 @@
 
   g.LifeLogic = { istDate, istMinutes, istWeekday, addDays, daysBetween, weekdayOf, hhmmToMin, fmtTime, fmtDate, relDays, isYMD,
     settingsOf, nextMaintenanceSaturday, isMaintenanceSaturday, maintenanceTasks, maintenanceWeekend, maintenanceOverview, applianceIcon, moneyItems,
-    noticeItems, calendarEvents, todoItems, todoView, todoTickable, TODO_ID_RE, healthToday, healthByDay, healthPlan, healthPhase, healthProgress, healthDay, healthEditable, mergeHealthPatch, noteItems, cleanNoteText, NOTE_MAX, NOTE_ID_RE, wikiSanitize, wikiPacked, wikiHref, wikiSvgOk, ideaItems, cleanIdeaTitle, cleanIdeaDetails, IDEA_ID_RE, IDEA_STATUSES, IDEA_STATUS_LABEL, IDEA_PRIORITIES, IDEA_TITLE_MAX, IDEA_DETAILS_MAX, dedupeLead, schoolDay, holidayEntry, holidayDates, noSchoolReason, nextSchoolDay,
+    noticeItems, calendarEvents, todoItems, todoView, todoTickable, TODO_ID_RE, healthToday, healthByDay, healthPlan, healthPhase, healthProgress, healthDay, healthEditable, mergeHealthPatch, healthDayStatus, healthLastDays, noteItems, cleanNoteText, NOTE_MAX, NOTE_ID_RE, wikiSanitize, wikiPacked, wikiHref, wikiSvgOk, ideaItems, cleanIdeaTitle, cleanIdeaDetails, IDEA_ID_RE, IDEA_STATUSES, IDEA_STATUS_LABEL, IDEA_PRIORITIES, IDEA_TITLE_MAX, IDEA_DETAILS_MAX, dedupeLead, schoolDay, holidayEntry, holidayDates, noSchoolReason, nextSchoolDay,
     chargingDevices, supplyItems, festivalDayInfo, festivalTriviaToday, activeFestivals, upcomingFestivals,
     todayItems, dueAlerts, noticePushTitle, sensitiveReason, pushSafeText, schoolRunPush };
   if (typeof module === 'object' && module.exports) module.exports = g.LifeLogic;

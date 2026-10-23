@@ -7,7 +7,7 @@
   const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   let reg = null;
   // Version of this page's code; must equal CACHE in sw.js (bump both together). A different live sw.js = new code.
-  const APP_VERSION = 'life-hq-v22';
+  const APP_VERSION = 'life-hq-v23';
 
   // In-memory only. Plaintext data is never written to storage.
   const st = { env: null, device: null, data: null, overrides: {}, flashId: null, noData: false, lastSync: 0, offline: false, lastCheck: 0 };
@@ -897,11 +897,16 @@
     const date = L.healthEditable(st.healthDate, today) ? st.healthDate : today;
     st.healthDate = date;
     const prev = hShift(date, -1);
+    const dayGroup = L.healthByDay(st.data, st.overrides, date).find(g => g.date === date);
     const ctx = {
       data: st.data, today, date, overrides: st.overrides || {},
       items: L.healthToday(st.data, date, st.overrides),
       progress: L.healthProgress(st.data, date),
       log: L.healthDay(st.data, date, st.overrides),
+      strip: L.healthLastDays(st.data, today, st.overrides, 7),
+      isEditable: iso => L.healthEditable(iso, today),
+      dismissed: dayGroup ? dayGroup.dismissed : [],
+      restore: id => setDismiss('tododis', id, todoBaseDismissed(id), false, ''),
       editable: L.healthEditable(date, today),
       canPrev: L.healthEditable(prev, today),
       prevDate: prev,

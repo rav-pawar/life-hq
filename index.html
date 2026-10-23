@@ -20,7 +20,7 @@
       <h1>Life HQ</h1>
     </a>
     <nav id="tabs" class="tabs hidden" aria-label="Sections">
-      <a href="#s-today">Today</a><a href="#s-todos">To-do</a><a href="#s-notes">Notes</a><a href="#s-ideas">Ideas</a><a href="#s-money">Money</a><a href="#s-family">Family</a><a href="#s-festivals">Festivals</a><a href="#s-charging">Charging</a><a href="#s-home">Home</a><a href="#s-supplies">Supplies</a><a href="#s-alerts">Alerts</a><a href="#s-wiki">Wiki</a>
+      <a href="#s-today">Today</a><a href="#s-health">Health</a><a href="#s-todos">To-do</a><a href="#s-notes">Notes</a><a href="#s-ideas">Ideas</a><a href="#s-money">Money</a><a href="#s-family">Family</a><a href="#s-festivals">Festivals</a><a href="#s-charging">Charging</a><a href="#s-home">Home</a><a href="#s-supplies">Supplies</a><a href="#s-alerts">Alerts</a><a href="#s-wiki">Wiki</a>
     </nav>
     <!-- Shown when new data or a new app version is ready; applied by itself after 10 s without interaction. -->
     <button id="updPill" class="upd-pill hidden" type="button" aria-live="polite">🔄 Update available · tap to refresh</button>
@@ -220,6 +220,10 @@
         <div id="wikiBox" class="wiki"></div>
       </section>
 
+      <section id="s-health" class="sec health-sec">
+        <div id="healthRoot"></div>
+      </section>
+
       <section id="s-sync" class="card sec">
         <h2>🔄 Changes to sync <span id="syncCount" class="pill">0</span></h2>
         <p id="syncLead" class="muted small">Taps (done, charged, low, paid…) are sent to your assistant automatically once a sync token is set (⚙️ Settings). Fallback: copy this and paste it to your assistant.</p>
@@ -240,6 +244,7 @@
   <script src="config.js"></script>
   <script src="db.js"></script>
   <script src="logic.js"></script>
+  <script src="health.js"></script>
   <script src="crypto.js"></script>
   <script src="app.js"></script>
 </body>

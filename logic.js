@@ -334,6 +334,36 @@
     });
   }
 
+  // ---- Health tab (v21): plan phases, the day log, and how far back editing is allowed ----
+  const HEALTH_EDIT_DAYS = 1; // today and yesterday are editable, nothing older
+  const ymdMs = s => Date.parse(s + 'T00:00:00Z');
+  function healthPlan(data) { const h = (data || {}).health; return (h && h.plan) || null; }
+  function healthPhase(data, dateISO) {
+    const plan = healthPlan(data); if (!plan || !Array.isArray(plan.phases)) return null;
+    const d = isYMD(dateISO) ? dateISO : istDate(Date.now());
+    return plan.phases.find(p => p && isYMD(p.start) && p.start <= d && (!p.end || d <= p.end)) || null;
+  }
+  function healthProgress(data, dateISO) {
+    const d = isYMD(dateISO) ? dateISO : istDate(Date.now());
+    const phase = healthPhase(data, d); if (!phase) return null;
+    const day = Math.max(1, Math.round((ymdMs(d) - ymdMs(phase.start)) / 86400000) + 1);
+    const total = isYMD(phase.end) ? Math.round((ymdMs(phase.end) - ymdMs(phase.start)) / 86400000) + 1 : null;
+    return { phase, day, total, pct: total ? Math.min(100, Math.round((day / total) * 100)) : 0 };
+  }
+  // Published log for the date, with this device's pending change layered on top.
+  function healthDay(data, dateISO, overrides) {
+    if (!isYMD(dateISO)) return {};
+    const log = ((data || {}).health || {}).log || {};
+    const base = (log && typeof log[dateISO] === 'object' && log[dateISO]) || {};
+    const o = (overrides || {})['health:' + dateISO];
+    return o && typeof o === 'object' ? Object.assign({}, base, o) : Object.assign({}, base);
+  }
+  function healthEditable(dateISO, todayISO) {
+    if (!isYMD(dateISO) || !isYMD(todayISO)) return false;
+    const diff = Math.round((ymdMs(todayISO) - ymdMs(dateISO)) / 86400000);
+    return diff >= 0 && diff <= HEALTH_EDIT_DAYS;
+  }
+
   // ---- Notes to self (synced through the inbox as note.add / note.delete) ----
   const NOTE_MAX = 500;
   const NOTE_ID_RE = /^n-[a-z0-9]{6,40}$/;
@@ -722,7 +752,7 @@
 
   g.LifeLogic = { istDate, istMinutes, istWeekday, addDays, daysBetween, weekdayOf, hhmmToMin, fmtTime, fmtDate, relDays, isYMD,
     settingsOf, nextMaintenanceSaturday, isMaintenanceSaturday, maintenanceTasks, maintenanceWeekend, maintenanceOverview, applianceIcon, moneyItems,
-    noticeItems, calendarEvents, todoItems, todoView, todoTickable, TODO_ID_RE, healthToday, healthByDay, noteItems, cleanNoteText, NOTE_MAX, NOTE_ID_RE, wikiSanitize, wikiPacked, wikiHref, wikiSvgOk, ideaItems, cleanIdeaTitle, cleanIdeaDetails, IDEA_ID_RE, IDEA_STATUSES, IDEA_STATUS_LABEL, IDEA_PRIORITIES, IDEA_TITLE_MAX, IDEA_DETAILS_MAX, dedupeLead, schoolDay, holidayEntry, holidayDates, noSchoolReason, nextSchoolDay,
+    noticeItems, calendarEvents, todoItems, todoView, todoTickable, TODO_ID_RE, healthToday, healthByDay, healthPlan, healthPhase, healthProgress, healthDay, healthEditable, noteItems, cleanNoteText, NOTE_MAX, NOTE_ID_RE, wikiSanitize, wikiPacked, wikiHref, wikiSvgOk, ideaItems, cleanIdeaTitle, cleanIdeaDetails, IDEA_ID_RE, IDEA_STATUSES, IDEA_STATUS_LABEL, IDEA_PRIORITIES, IDEA_TITLE_MAX, IDEA_DETAILS_MAX, dedupeLead, schoolDay, holidayEntry, holidayDates, noSchoolReason, nextSchoolDay,
     chargingDevices, supplyItems, festivalDayInfo, festivalTriviaToday, activeFestivals, upcomingFestivals,
     todayItems, dueAlerts, noticePushTitle, sensitiveReason, pushSafeText, schoolRunPush };
   if (typeof module === 'object' && module.exports) module.exports = g.LifeLogic;

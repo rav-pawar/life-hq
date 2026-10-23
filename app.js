@@ -7,7 +7,7 @@
   const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   let reg = null;
   // Version of this page's code; must equal CACHE in sw.js (bump both together). A different live sw.js = new code.
-  const APP_VERSION = 'life-hq-v21';
+  const APP_VERSION = 'life-hq-v22';
 
   // In-memory only. Plaintext data is never written to storage.
   const st = { env: null, device: null, data: null, overrides: {}, flashId: null, noData: false, lastSync: 0, offline: false, lastCheck: 0 };
@@ -183,7 +183,7 @@
     if (kind === 'tododis') { const t = find((d.todos || {}).items); return !t || !!t.dismissed === !!v.dismissed; }
     if (kind === 'health') {
       const e = ((((d || {}).health || {}).log) || {})[id] || {};
-      const norm = x => (x === '' ? undefined : x);
+      const norm = x => (x === '' || x === null ? undefined : x);
       return ['floor', 'strength', 'pain', 'mood', 'weight', 'waist', 'bpSys', 'bpDia', 'note']
         .every(k => norm(v[k]) === norm(e[k]));
     }
@@ -908,7 +908,12 @@
       nextDate: hShift(date, 1),
       queued: !!((st.overrides || {})['health:' + date]),
       tick: (item, checked) => tickTodo(item, checked),
-      saveDay: patch => setLocal('health:' + date, patch),
+      saveDay: patch => {
+        // Merge into any unsent edits for this day: a second save must never drop the first one's fields.
+        const key = 'health:' + date;
+        const cur = (st.overrides && st.overrides[key]) || {};
+        setLocal(key, L.mergeHealthPatch(cur, patch));
+      },
       setDate: iso => { st.healthDate = iso; renderHealthView(); },
       onBack: () => {
         setHealthView(false);

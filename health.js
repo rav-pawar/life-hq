@@ -16,7 +16,37 @@
     return n;
   };
   const clear = n => { while (n.firstChild) n.removeChild(n.firstChild); return n; };
+  const draft = {}; // unsaved form values per date, so a re-render never eats what you typed
   const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+
+  // The one place that turns form values into a health.day patch. Exported so a Node test can
+  // feed the exact same output to the merge validator (tools/test-contract.js in the private repo).
+  // Empty input clears a field only when it had a value before; otherwise it is left alone.
+  function buildDayPatch(values, initial) {
+    const v = values || {};
+    const base = initial || {};
+    const patch = {};
+    const num = (raw, key, dec) => {
+      const s = String(raw == null ? '' : raw).trim();
+      if (s === '') {
+        if (base[key] != null) patch[key] = null;
+        return;
+      }
+      const n = Number(s);
+      if (!Number.isFinite(n)) return;
+      patch[key] = dec ? Math.round(n * 10) / 10 : Math.round(n);
+    };
+    num(v.pain, 'pain', false);
+    num(v.mood, 'mood', false);
+    num(v.weight, 'weight', true);
+    num(v.waist, 'waist', true);
+    num(v.bpSys, 'bpSys', false);
+    num(v.bpDia, 'bpDia', false);
+    const note = String(v.note == null ? '' : v.note).trim();
+    if (note) patch.note = note;
+    else if (base.note) patch.note = null;
+    return patch;
+  }
 
   const DAYNAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -106,6 +136,7 @@
     const items = ctx.items || [];
     const doneN = items.filter(i => i.done).length;
     const log = ctx.log || {};
+    const ui = p.ui || {};
 
     // top bar: back + date stepper
     const top = el('div', 'htop');
@@ -165,11 +196,14 @@
       const ul = el('ul', 'hlist-rows');
       for (const it of items) ul.appendChild(tickRow(it, ctx));
       act.appendChild(ul);
-      const floorDone = !!(log.floor || (items.filter(i => /walk|neck/i.test(i.title)).every(i => i.done)));
+      const matched = items.filter(i => /walk|neck/i.test(i.title));
+      const floorDone = log.floor === true ? true
+        : log.floor === false ? false
+        : (matched.length > 0 && matched.every(i => i.done));
       const foot = el('p', 'hfoot');
       foot.textContent = floorDone
-        ? 'Floor done. Anything else today is bonus — and stay under the step ceiling.'
-        : 'The floor is the walk and the neck work. Everything else is bonus.';
+        ? (ui.floorDone || '')
+        : (ui.floorOpen || '');
       act.appendChild(foot);
     } else {
       act.appendChild(el('p', 'empty', 'No actions dated for this day.'));
@@ -179,8 +213,15 @@
     // quick log
     if (ctx.editable) {
       const lg = card('Log this day', { tag: 'syncs' });
-      lg.appendChild(el('p', 'hlead', 'Neck pain, weight, waist and blood pressure. Only today and yesterday can be edited.'));
+      lg.appendChild(el('p', 'hlead', 'Only today and yesterday can be edited. Everything here syncs.'));
       const form = el('div', 'hform');
+      const d = draft[ctx.date] || {};
+      const pick = k => (k in d ? d[k] : (log[k] != null ? log[k] : ''));
+      const bind = (node, key) => {
+        node.addEventListener('input', () => {
+          draft[ctx.date] = Object.assign({}, draft[ctx.date], { [key]: node.value });
+        });
+      };
 
       const field = (labelText, node, hint) => {
         const f = el('label', 'hfield');
@@ -189,25 +230,45 @@
         if (hint) f.appendChild(el('span', 'hfield-hint', hint));
         return f;
       };
-      const num = (value, min, max, step) => {
+      const num = (key, min, max, step) => {
         const i = el('input', 'hinput');
         i.type = 'number'; i.min = min; i.max = max; i.step = step || '1';
-        if (value != null && value !== '') i.value = value;
         i.inputMode = 'decimal';
+        const v = pick(key);
+        if (v !== '' && v != null) i.value = v;
+        bind(i, key);
         return i;
       };
 
-      const pain = num(log.pain, 0, 10, 1);
-      const mood = num(log.mood, 1, 5, 1);
-      const weight = num(log.weight, 30, 250, 0.1);
-      const waist = num(log.waist, 40, 200, 0.1);
-      const sys = num(log.bpSys, 70, 250, 1);
-      const dia = num(log.bpDia, 40, 150, 1);
+      const flags = el('div', 'hflags');
+      const toggle = (key, label) => {
+        const w = el('label', 'htoggle');
+        const cb = el('input');
+        cb.type = 'checkbox';
+        cb.checked = log[key] === true;
+        cb.addEventListener('change', () => ctx.saveDay({ [key]: cb.checked }));
+        w.append(cb, el('span', null, label));
+        return w;
+      };
+      flags.appendChild(toggle('floor', 'Floor done (walk + neck)'));
+      flags.appendChild(toggle('strength', 'Strength session done'));
+      const flagsField = field('Done today', flags);
+      flagsField.classList.add('hfield-wide');
+      form.appendChild(flagsField);
+
+      const pain = num('pain', 0, 10, 1);
+      const mood = num('mood', 1, 5, 1);
+      const weight = num('weight', 30, 250, 0.1);
+      const waist = num('waist', 40, 200, 0.1);
+      const sys = num('bpSys', 70, 250, 1);
+      const dia = num('bpDia', 40, 150, 1);
       const note = el('textarea', 'htext');
       note.rows = 3;
       note.maxLength = 500;
       note.placeholder = 'How did the day go? Anything worth remembering.';
-      if (log.note) note.value = log.note;
+      const draftNote = pick('note');
+      if (draftNote) note.value = draftNote;
+      bind(note, 'note');
 
       form.appendChild(field('Neck pain (0–10)', pain));
       form.appendChild(field('Mood (1–5)', mood));
@@ -225,20 +286,13 @@
       const save = el('button', 'btn primary', 'Save this day');
       save.type = 'button';
       save.addEventListener('click', () => {
-        const patch = {};
-        const take = (input, key, isInt) => {
-          if (input.value === '') return;
-          const v = Number(input.value);
-          if (!Number.isFinite(v)) return;
-          patch[key] = isInt ? Math.round(v) : Math.round(v * 10) / 10;
-        };
-        take(pain, 'pain', true); take(mood, 'mood', true);
-        take(weight, 'weight', false); take(waist, 'waist', false);
-        take(sys, 'bpSys', true); take(dia, 'bpDia', true);
-        if (note.value.trim()) patch.note = note.value.trim();
-        else if (log.note) patch.note = '';
+        const patch = buildDayPatch({
+          pain: pain.value, mood: mood.value, weight: weight.value, waist: waist.value,
+          bpSys: sys.value, bpDia: dia.value, note: note.value
+        }, ctx.log || {});
         if (!Object.keys(patch).length) { ctx.toast('Nothing to save'); return; }
         ctx.saveDay(patch);
+        delete draft[ctx.date];
         save.textContent = 'Saved · syncing';
         save.disabled = true;
         setTimeout(() => { save.textContent = 'Save this day'; save.disabled = false; }, 2500);
@@ -268,7 +322,7 @@
     // neck work: grouped in the plan data, never by hardcoded id
     const neck = (p.library || []).filter(x => x.group === 'neck');
     if (neck.length) {
-      const c = card('Neck and shoulder reset', { tag: '7 min · daily', lead: 'This is the pain fix. Tap a move for how to do it.' });
+      const c = card('Neck and shoulder reset', { tag: '7 min · daily', lead: ui.neckLead || '' });
       for (const m of neck) c.appendChild(moveDetails(m));
       root.appendChild(c);
     }
@@ -276,7 +330,7 @@
     // loading work
     const str = (p.library || []).filter(x => x.group !== 'neck');
     if (str.length) {
-      const c = card('Loading moves', { tag: '2 to 3 a week', lead: 'Stop 3 reps short of failure. Breathe out on every effort.' });
+      const c = card('Loading moves', { tag: '2 to 3 a week', lead: ui.loadingLead || '' });
       for (const m of str) c.appendChild(moveDetails(m));
       root.appendChild(c);
     }
@@ -337,7 +391,7 @@
         wrap.appendChild(d);
       }
       c.appendChild(wrap);
-      c.appendChild(el('p', 'hfoot', 'Phases move on exit criteria, not only on the calendar.'));
+      c.appendChild(el('p', 'hfoot', ui.roadmapNote || ''));
       root.appendChild(c);
     }
 
@@ -356,5 +410,7 @@
     }
   }
 
-  window.LifeHealth = { render };
+  const G = typeof window !== 'undefined' ? window : globalThis;
+  G.LifeHealth = { render, buildDayPatch };
+  if (typeof module === 'object' && module.exports) module.exports = { buildDayPatch };
 })();

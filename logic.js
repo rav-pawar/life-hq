@@ -363,6 +363,16 @@
     const diff = Math.round((ymdMs(todayISO) - ymdMs(dateISO)) / 86400000);
     return diff >= 0 && diff <= HEALTH_EDIT_DAYS;
   }
+  // Merge a new patch into the unsent edits already queued for that day. The queue replaces the stored
+  // override, so without this a second save would silently drop the first one's fields.
+  const HEALTH_PATCH_KEYS = ['floor', 'strength', 'pain', 'mood', 'weight', 'waist', 'bpSys', 'bpDia', 'note'];
+  function mergeHealthPatch(current, patch) {
+    const out = Object.assign({}, current && typeof current === 'object' ? current : {});
+    delete out.at; delete out.keep;
+    const p = patch && typeof patch === 'object' ? patch : {};
+    for (const k of HEALTH_PATCH_KEYS) if (k in p) out[k] = p[k];
+    return out;
+  }
 
   // ---- Notes to self (synced through the inbox as note.add / note.delete) ----
   const NOTE_MAX = 500;
@@ -752,7 +762,7 @@
 
   g.LifeLogic = { istDate, istMinutes, istWeekday, addDays, daysBetween, weekdayOf, hhmmToMin, fmtTime, fmtDate, relDays, isYMD,
     settingsOf, nextMaintenanceSaturday, isMaintenanceSaturday, maintenanceTasks, maintenanceWeekend, maintenanceOverview, applianceIcon, moneyItems,
-    noticeItems, calendarEvents, todoItems, todoView, todoTickable, TODO_ID_RE, healthToday, healthByDay, healthPlan, healthPhase, healthProgress, healthDay, healthEditable, noteItems, cleanNoteText, NOTE_MAX, NOTE_ID_RE, wikiSanitize, wikiPacked, wikiHref, wikiSvgOk, ideaItems, cleanIdeaTitle, cleanIdeaDetails, IDEA_ID_RE, IDEA_STATUSES, IDEA_STATUS_LABEL, IDEA_PRIORITIES, IDEA_TITLE_MAX, IDEA_DETAILS_MAX, dedupeLead, schoolDay, holidayEntry, holidayDates, noSchoolReason, nextSchoolDay,
+    noticeItems, calendarEvents, todoItems, todoView, todoTickable, TODO_ID_RE, healthToday, healthByDay, healthPlan, healthPhase, healthProgress, healthDay, healthEditable, mergeHealthPatch, noteItems, cleanNoteText, NOTE_MAX, NOTE_ID_RE, wikiSanitize, wikiPacked, wikiHref, wikiSvgOk, ideaItems, cleanIdeaTitle, cleanIdeaDetails, IDEA_ID_RE, IDEA_STATUSES, IDEA_STATUS_LABEL, IDEA_PRIORITIES, IDEA_TITLE_MAX, IDEA_DETAILS_MAX, dedupeLead, schoolDay, holidayEntry, holidayDates, noSchoolReason, nextSchoolDay,
     chargingDevices, supplyItems, festivalDayInfo, festivalTriviaToday, activeFestivals, upcomingFestivals,
     todayItems, dueAlerts, noticePushTitle, sensitiveReason, pushSafeText, schoolRunPush };
   if (typeof module === 'object' && module.exports) module.exports = g.LifeLogic;

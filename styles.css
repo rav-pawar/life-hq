@@ -533,3 +533,10 @@ body.view-health #s-health .section-head { display: none; }
   .hphases { grid-template-columns: 1fr; }
   .hdate-text { min-width: 120px; font-size: .88rem; }
 }
+
+/* Health: done-today toggles */
+.hflags { display: flex; flex-wrap: wrap; gap: 10px; }
+.htoggle { display: inline-flex; align-items: center; gap: 8px; background: #161a24; border: 1px solid #2a3040; border-radius: 10px; padding: 9px 12px; font-size: .85rem; color: var(--text); cursor: pointer; }
+.htoggle input { appearance: none; -webkit-appearance: none; width: 18px; height: 18px; border: 2px solid #3a4157; border-radius: 6px; position: relative; cursor: pointer; background: transparent; }
+.htoggle input:checked { background: var(--hgreen, #2fbf71); border-color: var(--hgreen, #2fbf71); }
+.htoggle input:checked::after { content: ""; position: absolute; left: 4px; top: 1px; width: 5px; height: 9px; border: solid #06210f; border-width: 0 2px 2px 0; transform: rotate(45deg); }

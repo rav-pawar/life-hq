@@ -383,7 +383,13 @@
     const done = all.filter(t => t.done).length;
     const total = all.length;
     const log = healthDay(data, dateISO, overrides);
-    const matched = all.filter(t => /walk|neck/i.test(t.title));
+    const planUi = (((data || {}).health || {}).plan || {}).ui || {};
+    const floorKeywords = (Array.isArray(planUi.floorKeywords) ? planUi.floorKeywords : [])
+      .filter(k => typeof k === 'string' && k.trim());
+    const matched = floorKeywords.length ? all.filter(t => {
+      const title = String(t.title || '').toLowerCase();
+      return floorKeywords.some(k => title.includes(k.toLowerCase()));
+    }) : [];
     const floor = log.floor === true ? true
       : log.floor === false ? false
       : (matched.length > 0 && matched.every(t => t.done));

@@ -7,7 +7,7 @@
   const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   let reg = null;
   // Version of this page's code; must equal CACHE in sw.js (bump both together). A different live sw.js = new code.
-  const APP_VERSION = 'life-hq-v23';
+  const APP_VERSION = 'life-hq-v24';
 
   // In-memory only. Plaintext data is never written to storage.
   const st = { env: null, device: null, data: null, overrides: {}, flashId: null, noData: false, lastSync: 0, offline: false, lastCheck: 0 };

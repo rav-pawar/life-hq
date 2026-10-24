@@ -137,6 +137,18 @@
     const doneN = items.filter(i => i.done).length;
     const log = ctx.log || {};
     const ui = p.ui || {};
+    const painLabel = ui.painLabel || 'Pain';
+    const painRange = ui.painRange || '';
+    const painTitle = painRange ? `${painLabel} ${painRange}` : painLabel;
+    const floorToggle = ui.floorToggle || 'Floor';
+    const strengthToggle = ui.strengthToggle || 'Strength';
+    const resetLabel = ui.resetLabel || 'Reset';
+    const floorKeywords = (Array.isArray(ui.floorKeywords) ? ui.floorKeywords : [])
+      .filter(k => typeof k === 'string' && k.trim());
+    const isFloorItem = title => {
+      const s = String(title || '').toLowerCase();
+      return floorKeywords.some(k => s.includes(k.toLowerCase()));
+    };
 
     // top bar: back + date stepper
     const top = el('div', 'htop');
@@ -187,7 +199,7 @@
     };
     tiles.appendChild(tile('Today', `${doneN} / ${items.length}`, doneN === items.length && items.length ? 'all done' : 'ticked so far'));
     tiles.appendChild(tile('Day', prog ? `${prog.day}` : '—', prog && prog.total ? `of ${prog.total}` : ''));
-    tiles.appendChild(tile('Neck pain', log.pain != null ? `${log.pain}` : '—', log.pain != null ? 'out of 10' : 'not logged'));
+    tiles.appendChild(tile(painLabel, log.pain != null ? `${log.pain}` : '—', log.pain != null ? 'out of 10' : 'not logged'));
     root.appendChild(tiles);
 
     // last 7 days: makes a missed day visible instead of letting it disappear
@@ -222,7 +234,7 @@
       const ul = el('ul', 'hlist-rows');
       for (const it of items) ul.appendChild(tickRow(it, ctx));
       act.appendChild(ul);
-      const matched = items.filter(i => /walk|neck/i.test(i.title));
+      const matched = items.filter(i => isFloorItem(i.title));
       const floorDone = log.floor === true ? true
         : log.floor === false ? false
         : (matched.length > 0 && matched.every(i => i.done));
@@ -299,8 +311,8 @@
         w.append(cb, el('span', null, label));
         return w;
       };
-      flags.appendChild(toggle('floor', 'Floor done (walk + neck)'));
-      flags.appendChild(toggle('strength', 'Strength session done'));
+      flags.appendChild(toggle('floor', floorToggle));
+      flags.appendChild(toggle('strength', strengthToggle));
       const flagsField = field('Done today', flags);
       flagsField.classList.add('hfield-wide');
       form.appendChild(flagsField);
@@ -319,7 +331,7 @@
       if (draftNote) note.value = draftNote;
       bind(note, 'note');
 
-      form.appendChild(field('Neck pain (0–10)', pain));
+      form.appendChild(field(painTitle, pain));
       form.appendChild(field('Mood (1–5)', mood));
       form.appendChild(field('Weight (kg)', weight));
       form.appendChild(field('Waist (cm)', waist));
@@ -355,7 +367,7 @@
     } else {
       const ro = card('Log', { tag: 'read only' });
       const rows = [
-        ['Neck pain', log.pain != null ? `${log.pain} / 10` : '—'],
+        [painLabel, log.pain != null ? `${log.pain} / 10` : '—'],
         ['Mood', log.mood != null ? `${log.mood} / 5` : '—'],
         ['Weight', log.weight != null ? `${log.weight} kg` : '—'],
         ['Waist', log.waist != null ? `${log.waist} cm` : '—'],
@@ -369,15 +381,15 @@
     }
 
     // neck work: grouped in the plan data, never by hardcoded id
-    const neck = (p.library || []).filter(x => x.group === 'neck');
-    if (neck.length) {
-      const c = card('Neck and shoulder reset', { tag: '7 min · daily', lead: ui.neckLead || '' });
-      for (const m of neck) c.appendChild(moveDetails(m));
+    const resetMoves = (p.library || []).filter(x => x.group === 'neck');
+    if (resetMoves.length) {
+      const c = card(resetLabel, { tag: '7 min · daily', lead: ui.resetLead || '' });
+      for (const m of resetMoves) c.appendChild(moveDetails(m));
       root.appendChild(c);
     }
 
     // loading work
-    const str = (p.library || []).filter(x => x.group !== 'neck');
+    const str = (p.library || []).filter(x => !resetMoves.includes(x));
     if (str.length) {
       const c = card('Loading moves', { tag: '2 to 3 a week', lead: ui.loadingLead || '' });
       for (const m of str) c.appendChild(moveDetails(m));
